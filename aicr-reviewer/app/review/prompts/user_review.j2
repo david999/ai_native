@@ -1,0 +1,16 @@
+Review the following merge request changes.
+
+## Merge Request
+**Title**: {{ mr_title }}
+{% if mr_description %}**Description**: {{ mr_description }}{% endif %}
+
+## Changed Files
+{{ changed_files_summary }}
+
+## Code Changes (unified diff + full file content where applicable)
+
+```
+{{ diff_text }}
+```
+
+Provide your review as a JSON object with score, summary, and issues.

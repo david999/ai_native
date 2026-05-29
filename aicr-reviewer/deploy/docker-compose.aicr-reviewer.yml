@@ -1,0 +1,25 @@
+# Linux 生产环境：aicr-reviewer 独立 compose 片段
+# 用法（在 gitlab 目录）:
+#   docker compose -f docker-compose.yml -f ../aicr-reviewer/deploy/docker-compose.aicr-reviewer.yml up -d aicr-reviewer
+#
+# 首次构建镜像:
+#   cd ../aicr-reviewer && docker build -t gitlab-aicr-reviewer:latest .
+
+services:
+  aicr-reviewer:
+    image: gitlab-aicr-reviewer:latest
+    container_name: aicr-reviewer
+    restart: always
+    env_file:
+      - ../.env
+    environment:
+      - GITLAB_URL=http://gitlab:8000
+    ports:
+      - "8001:8001"
+    networks:
+      - default
+
+networks:
+  default:
+    name: gitlab_default
+    external: true
