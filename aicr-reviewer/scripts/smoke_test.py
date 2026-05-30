@@ -3,19 +3,20 @@
 import json
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
 def test_parser():
-    from app.review.parser import StructuredResponseParser
+    from app.review.parser import StructuredResponseParser, ParseError
 
     raw = json.dumps({
         "score": 45,
         "summary": "Found NPE risk",
         "issues": [{
-            "file": "order-service/src/main/java/com/example/order/service/OrderService.java",
+            "file": "OrderService.java",
             "line": 64,
             "severity": "critical",
             "category": "null_safety",
@@ -26,30 +27,77 @@ def test_parser():
     result = StructuredResponseParser().parse(raw)
     assert result["score"] == 45.0
     assert len(result["issues"]) == 1
+
+    bad_line = json.dumps({"score": 50, "summary": "x", "issues": [{"line": "bad", "file": "a.java"}]})
+    result2 = StructuredResponseParser().parse(bad_line)
+    assert result2["issues"][0]["line"] == 0
+
+    try:
+        StructuredResponseParser().parse("not json at all")
+        assert False, "expected ParseError"
+    except ParseError:
+        pass
     print("OK parser")
 
 
-def test_chunker():
+def test_chunker_truncation():
     from app.review.chunker import DiffChunker
 
-    files = [
-        {"new_path": "a.java", "old_path": "a.java", "diff": "+line", "content": "class A {}", "is_supported": True},
-        {"new_path": "b.java", "old_path": "b.java", "diff": "+line", "content": "class B {}", "is_supported": True},
-    ]
-    chunks = DiffChunker().chunk_files(files)
-    assert len(chunks) >= 1
-    print("OK chunker")
+    huge = {"new_path": "Big.java", "old_path": "Big.java", "diff": "x" * 100000,
+            "content": "y" * 100000, "is_supported": True}
+    chunks = DiffChunker().chunk_files([huge])
+    assert len(chunks) == 1
+    assert "[truncated" in chunks[0]["files"][0]["diff"]
+    print("OK chunker truncation")
 
 
-def test_prompt_renderer():
-    from app.review.prompt_renderer import PromptRenderer
+def test_empty_chunks():
+    from app.review.orchestrator import ReviewOrchestrator
+    from app.exceptions import NoReviewableChangesError
 
-    r = PromptRenderer()
-    system = r.render_system(context_md="# Test context")
-    user = r.render_user(mr_title="feat: demo", changed_files_summary="- a.java", diff_text="+ code")
-    assert "Test context" in system
-    assert "feat: demo" in user
-    print("OK prompt_renderer")
+    orch = ReviewOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.context_builder.build = MagicMock(return_value=MagicMock(changed_files=[
+        {"new_path": "README.md", "is_supported": False}
+    ]))
+    try:
+        orch.run(1, 1)
+        assert False, "expected NoReviewableChangesError"
+    except NoReviewableChangesError:
+        pass
+    print("OK empty chunks")
+
+
+def test_llm_failure_raises():
+    from app.review.orchestrator import ReviewOrchestrator
+    from app.exceptions import LLMReviewError
+
+    llm = MagicMock()
+    llm.chat.side_effect = RuntimeError("api down")
+
+    ctx = MagicMock()
+    ctx.changed_files = [{"new_path": "a.java", "old_path": "a.java", "diff": "+x",
+                          "content": "", "is_supported": True}]
+    ctx.context_md = ""
+    ctx.title = ctx.description = ""
+
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    try:
+        orch.run(1, 1)
+        assert False, "expected LLMReviewError"
+    except LLMReviewError:
+        pass
+    print("OK llm failure")
+
+
+def test_redact():
+    from app.utils.redact import redact_secrets
+    text = 'password=secret123\nglpat-abc.def.01'
+    out = redact_secrets(text)
+    assert "secret123" not in out
+    assert "glpat-abc" not in out
+    print("OK redact")
 
 
 def test_health_import():
@@ -60,7 +108,9 @@ def test_health_import():
 
 if __name__ == "__main__":
     test_parser()
-    test_chunker()
-    test_prompt_renderer()
+    test_chunker_truncation()
+    test_empty_chunks()
+    test_llm_failure_raises()
+    test_redact()
     test_health_import()
     print("All smoke tests passed.")

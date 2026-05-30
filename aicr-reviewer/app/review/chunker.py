@@ -19,27 +19,40 @@ class DiffChunker:
             if not f.get("is_supported"):
                 continue
 
-            file_text = self._file_text(f)
+            file_entry = self._maybe_truncate_file(f, max_chars)
+            file_text = self._file_text(file_entry)
             file_chars = len(file_text)
-
-            if file_chars > max_chars and current_files:
-                chunks.append({"files": current_files, "total_chars": current_chars})
-                current_files = []
-                current_chars = 0
 
             if current_chars + file_chars > max_chars and current_files:
                 chunks.append({"files": current_files, "total_chars": current_chars})
                 current_files = []
                 current_chars = 0
 
-            current_files.append(f)
+            current_files.append(file_entry)
             current_chars += file_chars
 
         if current_files:
             chunks.append({"files": current_files, "total_chars": current_chars})
 
-        logger.info(f"Split {len(changed_files)} files into {len(chunks)} chunk(s)")
+        logger.info(
+            f"Split {len(changed_files)} files into {len(chunks)} chunk(s)"
+        )
         return chunks
+
+    @staticmethod
+    def _maybe_truncate_file(f: Dict, max_chars: int) -> Dict:
+        file_text = DiffChunker._file_text(f)
+        if len(file_text) <= max_chars:
+            return f
+        logger.warning(
+            f"Truncating {f.get('new_path', '?')} from {len(file_text)} to {max_chars} chars"
+        )
+        truncated_diff = (f.get("diff") or "")[:max_chars]
+        return {
+            **f,
+            "diff": truncated_diff + "\n... [truncated for token budget]",
+            "content": "",
+        }
 
     @staticmethod
     def _file_text(f: Dict) -> str:

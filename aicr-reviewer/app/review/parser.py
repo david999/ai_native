@@ -1,9 +1,13 @@
 import json
 import logging
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("aicr")
+
+
+class ParseError(Exception):
+    """LLM response could not be parsed into review JSON."""
 
 
 class StructuredResponseParser:
@@ -18,28 +22,32 @@ class StructuredResponseParser:
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
-            logger.warning("Direct JSON parse failed, attempting extraction from text")
+            logger.warning("Direct JSON parse failed, attempting extraction")
             data = self._extract_json(text)
             if data is None:
-                logger.error("Could not parse LLM response as JSON")
-                return self._fallback(raw)
+                raise ParseError(f"Could not parse LLM response (len={len(raw)})")
 
         return self._normalize(data)
 
     @staticmethod
-    def _extract_json(text: str) -> Any:
-        patterns = [
+    def _extract_json(text: str) -> Optional[Any]:
+        for pattern in (
             r'\{[\s\S]*"score"[\s\S]*"issues"[\s\S]*\}',
             r'\{[\s\S]*\}',
-        ]
-        for pattern in patterns:
-            matches = re.findall(pattern, text)
-            for match in matches:
+        ):
+            for match in re.findall(pattern, text):
                 try:
                     return json.loads(match)
                 except json.JSONDecodeError:
                     continue
         return None
+
+    @staticmethod
+    def _safe_line(value: Any) -> int:
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _normalize(data: Dict) -> Dict[str, Any]:
@@ -58,7 +66,7 @@ class StructuredResponseParser:
                 continue
             issues.append({
                 "file": str(item.get("file", "")),
-                "line": int(item.get("line", 0) or 0),
+                "line": StructuredResponseParser._safe_line(item.get("line")),
                 "severity": str(item.get("severity", "info")),
                 "category": str(item.get("category", "other")),
                 "message": str(item.get("message", "")),
@@ -66,11 +74,3 @@ class StructuredResponseParser:
             })
 
         return {"score": score, "summary": summary, "issues": issues}
-
-    @staticmethod
-    def _fallback(raw: str) -> Dict[str, Any]:
-        return {
-            "score": 50.0,
-            "summary": f"LLM response could not be parsed. Raw length: {len(raw)}",
-            "issues": [],
-        }

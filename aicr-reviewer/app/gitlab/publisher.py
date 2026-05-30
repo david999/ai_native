@@ -3,15 +3,13 @@ import hashlib
 from typing import Optional
 
 from app.gitlab.client import get_gitlab_client
+from app.config import SCORE_THRESHOLD
 
 logger = logging.getLogger("aicr")
 
-_fingerprints: set = set()
-
 
 def _make_fingerprint(file_path: str, line: int, category: str) -> str:
-    raw = f"{file_path}:{line}:{category}"
-    return hashlib.md5(raw.encode()).hexdigest()
+    return hashlib.md5(f"{file_path}:{line}:{category}".encode()).hexdigest()
 
 
 class GitLabPublisher:
@@ -38,7 +36,7 @@ class GitLabPublisher:
         project = gl.projects.get(project_id)
         mr = project.mergerequests.get(mr_iid)
 
-        if file_path and diff_refs:
+        if file_path and diff_refs and line > 0:
             try:
                 self._post_inline(mr, body, file_path, line, diff_refs)
                 logger.info(f"Posted inline discussion on {file_path}:{line}")
@@ -59,15 +57,17 @@ class GitLabPublisher:
         score: float,
         summary: str,
         issue_count: int,
+        threshold: float = SCORE_THRESHOLD,
     ):
         gl = get_gitlab_client()
         project = gl.projects.get(project_id)
         mr = project.mergerequests.get(mr_iid)
 
-        status = "PASSED" if score >= 60 else "FAILED"
+        status = "PASSED" if score >= threshold else "FAILED"
         body = (
             f"## AICR Review Summary: {status}\n\n"
             f"- **Score**: {score}/100\n"
+            f"- **Threshold**: {threshold}\n"
             f"- **Issues found**: {issue_count}\n\n"
             f"{summary}\n"
         )

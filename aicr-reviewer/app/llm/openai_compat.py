@@ -39,27 +39,41 @@ class OpenAICompatibleProvider:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> str:
-        kwargs: dict = {
+        base_kwargs: dict = {
             "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens or self.max_tokens,
             "temperature": temperature if temperature is not None else self.temperature,
         }
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
 
-        logger.info(f"LLM request: model={self.model}, messages={len(messages)}, json_mode={json_mode}")
-        try:
-            resp = self.client.chat.completions.create(**kwargs)
-            content = resp.choices[0].message.content or ""
-            usage = resp.usage
-            if usage:
-                logger.info(
-                    f"LLM usage: prompt_tokens={usage.prompt_tokens}, "
-                    f"completion_tokens={usage.completion_tokens}, "
-                    f"total_tokens={usage.total_tokens}"
-                )
-            return content
-        except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            raise
+        logger.info(
+            f"LLM request: model={self.model}, messages={len(messages)}, "
+            f"json_mode={json_mode}"
+        )
+
+        if json_mode:
+            try:
+                return self._complete({**base_kwargs, "response_format": {"type": "json_object"}})
+            except Exception as e:
+                if self._json_mode_unsupported(e):
+                    logger.warning("json_mode unsupported, retrying without response_format")
+                    return self._complete(base_kwargs)
+                raise
+
+        return self._complete(base_kwargs)
+
+    def _complete(self, kwargs: dict) -> str:
+        resp = self.client.chat.completions.create(**kwargs)
+        content = resp.choices[0].message.content or ""
+        usage = resp.usage
+        if usage:
+            logger.info(
+                f"LLM usage: prompt={usage.prompt_tokens}, "
+                f"completion={usage.completion_tokens}, total={usage.total_tokens}"
+            )
+        return content
+
+    @staticmethod
+    def _json_mode_unsupported(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        return "response_format" in msg or "json_object" in msg or "unsupported" in msg

@@ -1,1 +1,42 @@
-evn/
+# =============================================================================
+# evn/ — 本地/部署环境（勿把运行时数据与密钥提交 GitHub）
+# =============================================================================
+
+# 密钥（仅保留 evn/.env.example 模板）
+evn/.env
+evn/**/*.env
+!evn/.env.example
+
+# GitLab CE 运行时（体积大、机器相关、含密钥）
+evn/gitlab/data/
+evn/gitlab/logs/
+evn/gitlab/config/
+evn/gitlab/**/gitlab-secrets.json
+evn/gitlab/**/*.pid
+evn/gitlab/**/*.lock
+
+# GitLab Runner（config.toml 含 registration token）
+evn/gitlab-runner/
+
+# 兜底：evn 下所有日志与临时文件
+evn/**/*.log
+evn/**/current
+evn/**/@*
+
+# 允许提交的配置模板（compose 等）
+!evn/gitlab/
+!evn/gitlab/docker-compose.yml
+
+# =============================================================================
+# 应用与其它
+# =============================================================================
+
+aicr-reviewer/.venv/
+**/__pycache__/
+*.pyc
+
+.idea/
+
+# test_data 下各 demo 自带 .git，不纳入本仓库
+test_data/**/.git/
+evn/DockerData/DockerDesktopWSL/disk/docker_data.vhdx

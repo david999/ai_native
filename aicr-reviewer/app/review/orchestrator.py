@@ -1,28 +1,17 @@
 import logging
-import re
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from app.config import REVIEW_DRY_RUN, SCORE_THRESHOLD
+from app.exceptions import LLMReviewError, NoReviewableChangesError
 from app.gitlab.context_builder import ContextBuilder, MRContext
 from app.gitlab.publisher import GitLabPublisher
 from app.llm.base import LLMProvider
 from app.review.chunker import DiffChunker
 from app.review.prompt_renderer import PromptRenderer
-from app.review.parser import StructuredResponseParser
+from app.review.parser import StructuredResponseParser, ParseError
+from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
-
-_SECRET_PATTERNS = [
-    (re.compile(r"(password|secret|api[_-]?key|token)\s*[:=]\s*\S+", re.I), r"\1=***REDACTED***"),
-    (re.compile(r"glpat-[A-Za-z0-9._-]+"), "glpat-***REDACTED***"),
-    (re.compile(r"AKIA[0-9A-Z]{16}"), "AKIA***REDACTED***"),
-]
-
-
-def _redact_secrets(text: str) -> str:
-    for pattern, repl in _SECRET_PATTERNS:
-        text = pattern.sub(repl, text)
-    return text
 
 
 class ReviewOrchestrator:
@@ -43,38 +32,50 @@ class ReviewOrchestrator:
         logger.info(f"Starting review for project={project_id} MR !{mr_iid}")
 
         ctx: MRContext = self.context_builder.build(project_id, mr_iid, extra_diff)
-
         chunks = self.chunker.chunk_files(ctx.changed_files)
+
+        if not chunks:
+            raise NoReviewableChangesError(
+                "No reviewable file changes in MR (supported extensions only)"
+            )
 
         all_issues: list = []
         min_score = 100.0
         all_summaries: list = []
+        llm_failures: list = []
 
         for i, chunk in enumerate(chunks):
             logger.info(f"Reviewing chunk {i + 1}/{len(chunks)} ({chunk['total_chars']} chars)")
-            chunk_result = self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+            try:
+                chunk_result = self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+            except LLMReviewError as e:
+                llm_failures.append(str(e))
+                continue
+
             all_issues.extend(chunk_result.get("issues", []))
             chunk_score = chunk_result.get("score", 100.0)
             min_score = min(min_score, chunk_score)
             if chunk_result.get("summary"):
                 all_summaries.append(chunk_result["summary"])
 
+        if llm_failures and len(llm_failures) == len(chunks):
+            raise LLMReviewError("; ".join(llm_failures))
+
+        if llm_failures:
+            all_summaries.append(f"Partial LLM failures: {'; '.join(llm_failures)}")
+
         final_score = min_score
         summary = " | ".join(all_summaries) if all_summaries else "Review completed."
 
         if not REVIEW_DRY_RUN:
             self._publish_results(ctx, final_score, summary, all_issues)
-        else:
-            logger.info("DRY RUN: skipping GitLab comment posting")
-
-        code_quality = self._build_code_quality(all_issues)
 
         logger.info(f"Review complete: score={final_score}, issues={len(all_issues)}")
         return {
             "score": final_score,
             "summary": summary,
             "issues": all_issues,
-            "code_quality": code_quality,
+            "code_quality": self._build_code_quality(all_issues),
         }
 
     def _review_chunk(
@@ -86,11 +87,14 @@ class ReviewOrchestrator:
         )
 
         changed_files_summary = self._files_summary(chunk["files"])
-        diff_text = _redact_secrets(self._build_diff_text(chunk["files"]))
+        diff_text = redact_secrets(self._build_diff_text(chunk["files"]))
 
         chunk_note = ""
         if total_chunks > 1:
-            chunk_note = f"\n\nNote: This is chunk {chunk_index + 1} of {total_chunks}. Review only the files shown."
+            chunk_note = (
+                f"\n\nNote: chunk {chunk_index + 1}/{total_chunks}. "
+                "Review only the files shown."
+            )
 
         user_prompt = self.renderer.render_user(
             mr_title=ctx.title,
@@ -106,12 +110,13 @@ class ReviewOrchestrator:
 
         try:
             raw = self.llm.chat(messages, json_mode=True)
-            logger.debug(f"LLM raw response length: {len(raw)}")
         except Exception as e:
-            logger.error(f"LLM call failed: {e}")
-            return {"score": 100.0, "summary": f"LLM call failed: {e}", "issues": []}
+            raise LLMReviewError(f"LLM call failed: {e}") from e
 
-        return self.parser.parse(raw)
+        try:
+            return self.parser.parse(raw)
+        except ParseError as e:
+            raise LLMReviewError(f"LLM response parse failed: {e}") from e
 
     def _publish_results(self, ctx: MRContext, score: float, summary: str, issues: list):
         for issue in issues:
@@ -142,6 +147,7 @@ class ReviewOrchestrator:
             score=score,
             summary=summary,
             issue_count=len(issues),
+            threshold=SCORE_THRESHOLD,
         )
 
     @staticmethod
@@ -170,16 +176,19 @@ class ReviewOrchestrator:
 
     @staticmethod
     def _build_code_quality(issues: list) -> list:
-        cq = []
-        for issue in issues:
-            cq.append({
+        return [
+            {
                 "description": issue.get("message", ""),
                 "check_name": "aicr-review",
-                "fingerprint": f"{issue.get('file', '')}:{issue.get('line', 0)}:{issue.get('category', '')}",
+                "fingerprint": (
+                    f"{issue.get('file', '')}:{issue.get('line', 0)}:"
+                    f"{issue.get('category', '')}"
+                ),
                 "severity": issue.get("severity", "info"),
                 "location": {
                     "path": issue.get("file", ""),
                     "lines": {"begin": issue.get("line", 0) or 1},
                 },
-            })
-        return cq
+            }
+            for issue in issues
+        ]

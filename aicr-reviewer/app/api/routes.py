@@ -3,7 +3,11 @@ from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict
 
-from app.config import AICR_BOT_TOKEN, GITLAB_WEBHOOK_SECRET, LLM_API_KEY
+from app.config import (
+    AICR_BOT_TOKEN, GITLAB_WEBHOOK_SECRET, GITLAB_WEBHOOK_ALLOW_INSECURE,
+    LLM_API_KEY, REVIEW_API_SECRET,
+)
+from app.exceptions import LLMReviewError, NoReviewableChangesError, ReviewError
 from app.review.orchestrator import ReviewOrchestrator
 from app.gitlab.context_builder import ContextBuilder
 from app.llm.factory import create_llm_provider
@@ -26,6 +30,35 @@ class ReviewResult(BaseModel):
     summary: str = ""
 
 
+def _verify_review_auth(request: Request) -> None:
+    if not REVIEW_API_SECRET:
+        return
+    token = request.headers.get("X-AICR-Secret", "")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+    if token != REVIEW_API_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _run_orchestrator(project_id: int, mr_iid: int, extra_diff: str = "") -> dict:
+    if not AICR_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="AICR_BOT_TOKEN is not configured")
+
+    try:
+        llm = create_llm_provider()
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail="LLM provider not configured") from e
+
+    orchestrator = ReviewOrchestrator(
+        context_builder=ContextBuilder(),
+        llm_provider=llm,
+        publisher=GitLabPublisher(),
+    )
+    return orchestrator.run(project_id=project_id, mr_iid=mr_iid, extra_diff=extra_diff)
+
+
 @router.get("/health")
 def health():
     from app.config import GITLAB_URL, LLM_PROVIDER, LLM_MODEL
@@ -35,30 +68,28 @@ def health():
         "token_set": bool(AICR_BOT_TOKEN),
         "llm_provider": LLM_PROVIDER,
         "llm_model": LLM_MODEL,
-        "llm_key_set": bool(LLM_API_KEY) if LLM_PROVIDER else False,
+        "llm_key_set": bool(LLM_API_KEY),
+        "review_auth_required": bool(REVIEW_API_SECRET),
     }
 
 
 @router.post("/review", response_model=ReviewResult)
-def review(req: ReviewRequest):
-    if not AICR_BOT_TOKEN:
-        raise HTTPException(status_code=500, detail="AICR_BOT_TOKEN is not set")
+def review(req: ReviewRequest, request: Request):
+    _verify_review_auth(request)
 
     try:
-        llm = create_llm_provider()
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-
-    try:
-        orchestrator = ReviewOrchestrator(
-            context_builder=ContextBuilder(),
-            llm_provider=llm,
-            publisher=GitLabPublisher(),
-        )
-        result = orchestrator.run(project_id=req.project_id, mr_iid=req.mr_iid, extra_diff=req.diff)
+        result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
+    except NoReviewableChangesError as e:
+        logger.info(f"No reviewable changes: {e}")
+        return ReviewResult(score=100.0, issues=[], summary=str(e))
+    except (LLMReviewError, ReviewError) as e:
+        logger.error(f"Review failed: {e}")
+        raise HTTPException(status_code=503, detail="Review failed") from e
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Review failed: {e}", exc_info=True)
-        raise HTTPException(status_code=503, detail=f"Review failed: {e}") from e
+        logger.error(f"Unexpected review error: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail="Review failed") from e
 
     return ReviewResult(
         score=result["score"],
@@ -70,13 +101,20 @@ def review(req: ReviewRequest):
 
 @router.post("/webhook/gitlab")
 async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
+    if not GITLAB_WEBHOOK_SECRET:
+        if not GITLAB_WEBHOOK_ALLOW_INSECURE:
+            raise HTTPException(
+                status_code=503,
+                detail="GITLAB_WEBHOOK_SECRET not configured",
+            )
+        logger.warning("Webhook running without secret (GITLAB_WEBHOOK_ALLOW_INSECURE=1)")
+    else:
+        token = request.headers.get("X-Gitlab-Token", "")
+        if token != GITLAB_WEBHOOK_SECRET:
+            logger.warning("Webhook token mismatch")
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
     body = await request.json()
-    token = request.headers.get("X-Gitlab-Token", "")
-
-    if GITLAB_WEBHOOK_SECRET and token != GITLAB_WEBHOOK_SECRET:
-        logger.warning("Webhook token mismatch, rejecting")
-        return {"status": "rejected"}
-
     object_kind = body.get("object_kind", "")
     if object_kind != "merge_request":
         return {"status": "ignored", "reason": f"not merge_request: {object_kind}"}
@@ -92,12 +130,7 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
 
     def _run_review():
         try:
-            orchestrator = ReviewOrchestrator(
-                context_builder=ContextBuilder(),
-                llm_provider=create_llm_provider(),
-                publisher=GitLabPublisher(),
-            )
-            orchestrator.run(project_id=project_id, mr_iid=mr_iid)
+            _run_orchestrator(project_id, mr_iid)
         except Exception as e:
             logger.error(f"Webhook review failed: {e}", exc_info=True)
 

@@ -2,7 +2,8 @@ import logging
 from typing import Optional
 
 from app.gitlab.client import get_gitlab_client
-from app.config import CONTEXT_MAX_CHARS
+from app.config import CONTEXT_MAX_CHARS, SCORE_THRESHOLD
+from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
 
@@ -74,7 +75,16 @@ class ContextBuilder:
                 "is_supported": is_supported,
             })
 
-        ctx.context_md = self._load_context_md(project, mr)
+        if extra_diff:
+            ctx.changed_files.insert(0, {
+                "old_path": "",
+                "new_path": "_ci_extra_diff.patch",
+                "diff": extra_diff,
+                "content": "",
+                "is_supported": True,
+            })
+
+        ctx.context_md = redact_secrets(self._load_context_md(project, mr))
 
         logger.info(
             f"MR !{mr_iid} context: {len(ctx.changed_files)} files, "
@@ -98,9 +108,8 @@ class ContextBuilder:
             except Exception:
                 continue
 
-        default = self._default_context()
         logger.info("Using built-in default context (no .llm/CONTEXT.md found)")
-        return default
+        return self._default_context()
 
     @staticmethod
     def _default_context() -> str:

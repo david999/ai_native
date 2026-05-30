@@ -1,0 +1,37 @@
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    restart: always
+    hostname: 'localhost'
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8000'
+        gitlab_rails['time_zone'] = 'Asia/Shanghai'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2222
+    ports:
+      - '8000:8000'
+      - '2222:22'
+    volumes:
+      - './data:/var/opt/gitlab'
+      - './logs:/var/log/gitlab'
+      - './config:/etc/gitlab'
+    shm_size: '256m'
+
+  gitlab-runner:
+    image: gitlab/gitlab-runner:latest
+    container_name: gitlab-runner
+    restart: always
+    depends_on:
+      - gitlab
+    volumes:
+      - '../gitlab-runner/config:/etc/gitlab-runner'
+      - '/var/run/docker.sock:/var/run/docker.sock'
+
+  # aicr-reviewer: Linux 生产见 aicr-reviewer/deploy/docker-compose.aicr-reviewer.yml
+  # 本地无 Docker: aicr-reviewer/scripts/run_local.ps1
+
+networks:
+  default:
+    name: gitlab_default
+    external: true
