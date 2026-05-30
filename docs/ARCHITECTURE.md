@@ -91,9 +91,12 @@ flowchart TB
 
 | 场景 | HTTP | 行为 |
 |------|------|------|
-| 无可审文件（无支持扩展名变更） | 200，`score=100` | CI fail-open（通过） |
-| LLM/解析失败 | 503 | CI fail-open（通过） |
-| 评审成功但分数低于阈值 | 200 + 低分 | GitLab 侧 fail-close（由 CI 规则决定） |
+| 无可审文件（无支持扩展名变更） | 200，`review_completed=false` | Runner 脚本放行 |
+| 评审服务异常（鉴权/LLM/解析/GitLab/网络/超时/配置等） | 200，`review_completed=false` | Runner 脚本放行 |
+| 评审成功但分数低于阈值 | 200，`review_completed=true`，低分 | **仅此时** `ci_review_gate.sh` 失败 job |
+| 评审成功且达标 | 200，`review_completed=true`，高分 | 通过 |
+
+MR 是否被拦由 **`aicr-reviewer/scripts/ci_review_gate.sh`** 在 GitLab Runner 中判定，而非 HTTP 状态码。
 | Webhook 非 MR 或非 open/update/reopen | 200 ignored | 不触发评审 |
 
 Webhook 评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepted`。

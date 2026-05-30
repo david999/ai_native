@@ -16,6 +16,8 @@ from app.gitlab.publisher import GitLabPublisher
 logger = logging.getLogger("aicr")
 router = APIRouter()
 
+FAIL_OPEN_SCORE = 100.0
+
 
 class ReviewRequest(BaseModel):
     project_id: int
@@ -28,6 +30,19 @@ class ReviewResult(BaseModel):
     issues: List[Dict]
     code_quality: List[Dict] = []
     summary: str = ""
+    # True 表示 LLM 已完成评审；CI 仅在此为 true 且分数低于阈值时才失败
+    review_completed: bool = False
+
+
+def _fail_open_review(reason: str) -> ReviewResult:
+    """评审未实际完成（异常/跳过）：返回占位分数，由 CI 脚本放行 MR。"""
+    logger.error(f"Review fail-open (MR passes): {reason}")
+    return ReviewResult(
+        score=FAIL_OPEN_SCORE,
+        issues=[],
+        summary=f"Review skipped (fail-open): {reason}",
+        review_completed=False,
+    )
 
 
 def _verify_review_auth(request: Request) -> None:
@@ -76,27 +91,35 @@ def health():
 
 @router.post("/review", response_model=ReviewResult)
 def review(req: ReviewRequest, request: Request):
-    _verify_review_auth(request)
+    try:
+        _verify_review_auth(request)
+    except HTTPException as e:
+        return _fail_open_review(str(e.detail))
 
     try:
         result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
     except NoReviewableChangesError as e:
         logger.info(f"No reviewable changes: {e}")
-        return ReviewResult(score=100.0, issues=[], summary=str(e))
+        return ReviewResult(
+            score=FAIL_OPEN_SCORE,
+            issues=[],
+            summary=str(e),
+            review_completed=False,
+        )
+    except HTTPException as e:
+        return _fail_open_review(str(e.detail))
     except (LLMReviewError, ReviewError) as e:
-        logger.error(f"Review failed: {e}")
-        raise HTTPException(status_code=503, detail="Review failed") from e
-    except HTTPException:
-        raise
+        return _fail_open_review(str(e))
     except Exception as e:
         logger.error(f"Unexpected review error: {e}", exc_info=True)
-        raise HTTPException(status_code=503, detail="Review failed") from e
+        return _fail_open_review(str(e))
 
     return ReviewResult(
         score=result["score"],
         issues=result["issues"],
         code_quality=result.get("code_quality", []),
         summary=result.get("summary", ""),
+        review_completed=True,
     )
 
 

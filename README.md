@@ -35,7 +35,7 @@
 
 ## 评审触发方式
 
-- **CI**：在流水线中 `POST /review`，携带 `project_id`、`mr_iid`；可选 Header `X-AICR-Secret`。
+- **CI**：Runner 执行 `aicr-reviewer/scripts/ci_review_gate.sh`（内部 `POST /review`）；仅 `review_completed=true` 且分数低于阈值时失败 job。示例见 `aicr-reviewer/ci/gitlab-ci.snippet.yml`。
 - **Webhook**：GitLab MR 事件 `POST /webhook/gitlab`（需配置 `GITLAB_WEBHOOK_SECRET`）。
 
 详细流程见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。

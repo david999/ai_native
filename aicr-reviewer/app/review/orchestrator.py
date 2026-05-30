@@ -58,7 +58,7 @@ class ReviewOrchestrator:
             if chunk_result.get("summary"):
                 all_summaries.append(chunk_result["summary"])
 
-        # 所有分块均 LLM 失败 → 503；部分失败则继续用已成功块的结果
+        # 所有分块均 LLM 失败 → 抛错，由 API 层 fail-open（score=100）
         if llm_failures and len(llm_failures) == len(chunks):
             raise LLMReviewError("; ".join(llm_failures))
 

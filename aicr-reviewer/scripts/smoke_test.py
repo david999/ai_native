@@ -106,6 +106,38 @@ def test_health_import():
     print("OK app import")
 
 
+def test_review_fail_open():
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+    from main import app
+    from app.exceptions import LLMReviewError
+
+    client = TestClient(app)
+    with patch("app.api.routes._run_orchestrator", side_effect=LLMReviewError("timeout")):
+        resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["score"] == 100.0
+    assert body["review_completed"] is False
+    assert "fail-open" in body["summary"]
+    print("OK review fail-open")
+
+
+def test_review_auth_fail_open():
+    from unittest.mock import patch
+    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes._verify_review_auth", side_effect=HTTPException(401, "Unauthorized")):
+        resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["review_completed"] is False
+    print("OK auth fail-open")
+
+
 if __name__ == "__main__":
     test_parser()
     test_chunker_truncation()
@@ -113,4 +145,6 @@ if __name__ == "__main__":
     test_llm_failure_raises()
     test_redact()
     test_health_import()
+    test_review_fail_open()
+    test_review_auth_fail_open()
     print("All smoke tests passed.")
