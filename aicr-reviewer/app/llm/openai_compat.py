@@ -1,3 +1,5 @@
+"""OpenAI Chat Completions 实现；不支持 json_object 时自动降级为普通 completion。"""
+
 import logging
 from typing import List, Dict, Optional
 

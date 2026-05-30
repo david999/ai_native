@@ -31,6 +31,7 @@ class ReviewResult(BaseModel):
 
 
 def _verify_review_auth(request: Request) -> None:
+    """校验 CI 密钥；未配置 REVIEW_API_SECRET 时跳过（便于本地开发）。"""
     if not REVIEW_API_SECRET:
         return
     token = request.headers.get("X-AICR-Secret", "")

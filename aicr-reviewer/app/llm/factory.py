@@ -1,3 +1,5 @@
+"""根据 LLM_PROVIDER 与环境变量创建 OpenAI 兼容客户端。"""
+
 import logging
 
 from app.config import LLM_PROVIDER, LLM_API_BASE, LLM_API_KEY, LLM_MODEL

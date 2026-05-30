@@ -13,6 +13,8 @@ def _make_fingerprint(file_path: str, line: int, category: str) -> str:
 
 
 class GitLabPublisher:
+    """同一评审批次内按 file:line:category 去重，避免重复评论。"""
+
     def __init__(self):
         self._seen: set = set()
 

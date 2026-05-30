@@ -1,3 +1,5 @@
+"""将 MR 变更文件按 token 预算切分为多个 LLM 请求块。"""
+
 import logging
 from typing import List, Dict
 
@@ -5,10 +7,13 @@ from app.config import REVIEW_MAX_INPUT_TOKENS
 
 logger = logging.getLogger("aicr")
 
+# 粗略估算：1 token ≈ 4 字符（中英文混合场景下的保守值）
 APPROX_CHARS_PER_TOKEN = 4
 
 
 class DiffChunker:
+    """按 REVIEW_MAX_INPUT_TOKENS 将 supported 文件打包成多块，单文件超大时截断 diff。"""
+
     def chunk_files(self, changed_files: List[Dict]) -> List[Dict]:
         max_chars = REVIEW_MAX_INPUT_TOKENS * APPROX_CHARS_PER_TOKEN
         chunks: List[Dict] = []
