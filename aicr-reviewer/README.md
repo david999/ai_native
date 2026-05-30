@@ -61,6 +61,7 @@ docker compose -f docker-compose.yml \
 
 | 场景 | HTTP | CI |
 |------|------|-----|
-| LLM/解析失败 | 503 | fail-open（通过） |
+| 评审服务异常（LLM/GitLab/网络/超时/配置等） | 200 + score=100 | fail-open（通过） |
 | 低分 | 200 + score | fail-close |
 | 无可审文件 | 200 + score=100 | 通过 |
+| 鉴权失败 | 401 | 失败（非评审异常） |

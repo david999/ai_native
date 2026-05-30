@@ -92,8 +92,9 @@ flowchart TB
 | 场景 | HTTP | 行为 |
 |------|------|------|
 | 无可审文件（无支持扩展名变更） | 200，`score=100` | CI fail-open（通过） |
-| LLM/解析失败 | 503 | CI fail-open（通过） |
+| 评审服务异常（LLM/解析/GitLab/网络/超时/配置等） | 200，`score=100` | CI fail-open（通过） |
 | 评审成功但分数低于阈值 | 200 + 低分 | GitLab 侧 fail-close（由 CI 规则决定） |
+| `POST /review` 鉴权失败 | 401 | 失败（非评审流水线异常） |
 | Webhook 非 MR 或非 open/update/reopen | 200 ignored | 不触发评审 |
 
 Webhook 评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepted`。

@@ -16,6 +16,8 @@ from app.gitlab.publisher import GitLabPublisher
 logger = logging.getLogger("aicr")
 router = APIRouter()
 
+FAIL_OPEN_SCORE = 100.0
+
 
 class ReviewRequest(BaseModel):
     project_id: int
@@ -28,6 +30,16 @@ class ReviewResult(BaseModel):
     issues: List[Dict]
     code_quality: List[Dict] = []
     summary: str = ""
+
+
+def _fail_open_review(reason: str) -> ReviewResult:
+    """评审服务异常时 fail-open：返回满分，让 CI/MR 通过。"""
+    logger.error(f"Review fail-open (MR passes): {reason}")
+    return ReviewResult(
+        score=FAIL_OPEN_SCORE,
+        issues=[],
+        summary=f"Review skipped (fail-open): {reason}",
+    )
 
 
 def _verify_review_auth(request: Request) -> None:
@@ -82,15 +94,16 @@ def review(req: ReviewRequest, request: Request):
         result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
     except NoReviewableChangesError as e:
         logger.info(f"No reviewable changes: {e}")
-        return ReviewResult(score=100.0, issues=[], summary=str(e))
+        return ReviewResult(score=FAIL_OPEN_SCORE, issues=[], summary=str(e))
+    except HTTPException as e:
+        if e.status_code == 401:
+            raise
+        return _fail_open_review(str(e.detail))
     except (LLMReviewError, ReviewError) as e:
-        logger.error(f"Review failed: {e}")
-        raise HTTPException(status_code=503, detail="Review failed") from e
-    except HTTPException:
-        raise
+        return _fail_open_review(str(e))
     except Exception as e:
         logger.error(f"Unexpected review error: {e}", exc_info=True)
-        raise HTTPException(status_code=503, detail="Review failed") from e
+        return _fail_open_review(str(e))
 
     return ReviewResult(
         score=result["score"],
