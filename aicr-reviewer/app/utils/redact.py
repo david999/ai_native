@@ -1,3 +1,5 @@
+"""在送入 LLM 前对 diff/上下文中的疑似密钥做占位替换。"""
+
 import re
 
 _SECRET_PATTERNS = [

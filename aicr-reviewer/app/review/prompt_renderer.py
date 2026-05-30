@@ -1,3 +1,5 @@
+"""使用 Jinja2 渲染 system/user 评审提示词（模板位于 prompts/）。"""
+
 import os
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 

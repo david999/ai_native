@@ -35,6 +35,8 @@ class MRContext:
 
 
 class ContextBuilder:
+    """拉取 MR 变更列表，过滤 SUPPORTED_EXTENSIONS，并加载项目 LLM 上下文文档。"""
+
     def build(self, project_id: int, mr_iid: int, extra_diff: str = "") -> MRContext:
         gl = get_gitlab_client()
         project = gl.projects.get(project_id)

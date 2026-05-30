@@ -1,6 +1,8 @@
 # AICR Reviewer
 
-LLM-powered code review service for GitLab MRs.
+基于 LLM 的 GitLab Merge Request 自动代码评审服务。
+
+更多说明见仓库根目录 [README.md](../README.md)、[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)。
 
 ## 运行方式
 

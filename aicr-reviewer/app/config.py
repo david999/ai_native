@@ -1,10 +1,20 @@
-"""Shared configuration and secret loading."""
+"""从 monorepo 环境文件加载配置。
+
+加载顺序（``override=False``，先出现的变量优先）：
+
+1. ``<repo>/evn/.env`` — 推荐的生产/本地统一配置
+2. ``<repo>/.env``
+3. ``aicr-reviewer/.env``
+
+所有模块应 ``from app.config import ...`` 读取常量，避免散落 ``os.getenv``。
+"""
 
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+# aicr-reviewer/app/config.py -> parents[2] = 仓库根目录
 _MONOREPO_ROOT = Path(__file__).resolve().parents[2]
 
 

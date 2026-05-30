@@ -1,3 +1,5 @@
+"""GitLab Python SDK 客户端单例，全进程复用同一连接配置。"""
+
 import gitlab
 from app.config import GITLAB_URL, AICR_BOT_TOKEN
 

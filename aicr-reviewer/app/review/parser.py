@@ -1,3 +1,5 @@
+"""解析 LLM 返回的 JSON 评审结果，兼容 markdown 代码块包裹的响应。"""
+
 import json
 import logging
 import re
@@ -7,10 +9,12 @@ logger = logging.getLogger("aicr")
 
 
 class ParseError(Exception):
-    """LLM response could not be parsed into review JSON."""
+    """LLM 响应无法解析为包含 score/issues 的结构化 JSON。"""
 
 
 class StructuredResponseParser:
+    """将 LLM 文本规范为 {score, summary, issues[]}，score 限制在 0–100。"""
+
     def parse(self, raw: str) -> Dict[str, Any]:
         text = raw.strip()
 

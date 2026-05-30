@@ -1,4 +1,8 @@
-"""Review pipeline exceptions."""
+"""评审流水线异常层次。
+
+- NoReviewableChangesError：无支持扩展名的变更 → API 返回 score=100
+- LLMReviewError：LLM 或解析失败 → API 503，CI fail-open
+"""
 
 
 class ReviewError(Exception):
