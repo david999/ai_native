@@ -1,0 +1,14 @@
+# 将以下 job 合并到业务仓库 .gitlab-ci.yml（MR 流水线）
+#
+# 变量（GitLab CI/CD Settings）:
+#   AICR_REVIEW_URL          评审服务地址
+#   AICR_REVIEW_SECRET       与 REVIEW_API_SECRET 一致（可选）
+#   AICR_SCORE_THRESHOLD     默认 60
+
+aicr-review:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - bash "${CI_PROJECT_DIR}/aicr-reviewer/scripts/ci_review_gate.sh"
+  allow_failure: false
