@@ -2,6 +2,8 @@
 
 本文档说明本工程（**AICR Reviewer**）如何利用大语言模型（LLM）对 GitLab Merge Request 进行自动代码评审，涵盖端到端流程、提示词设计、模型接入与结果处理。系统架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；运行与 API 见 [aicr-reviewer/README.md](../aicr-reviewer/README.md)。
 
+> 浏览器阅读版：[LLM_CODE_REVIEW.html](LLM_CODE_REVIEW.html)（含侧边目录与流程图）
+
 ---
 
 ## 1. 目标与边界

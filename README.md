@@ -31,6 +31,7 @@
 |------|------|
 | [aicr-reviewer/README.md](aicr-reviewer/README.md) | 运行方式、API、失败策略 |
 | [docs/LLM_CODE_REVIEW.md](docs/LLM_CODE_REVIEW.md) | **大模型如何实现代码评审**（流程、提示词、接入与门禁） |
+| [docs/LLM_CODE_REVIEW.html](docs/LLM_CODE_REVIEW.html) | 同上（HTML 阅读版，含目录导航） |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构与评审流水线 |
 | [docs/SECRETS.md](docs/SECRETS.md) | 密钥与环境变量说明 |
 
