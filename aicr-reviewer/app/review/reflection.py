@@ -16,15 +16,25 @@ logger = logging.getLogger("aicr")
 _REFLECTION_SEVERITIES = frozenset({"critical", "major"})
 
 
-def should_reflect(score: float, issues: List[dict]) -> bool:
+def should_reflect(
+    score: float,
+    issues: List[dict],
+    *,
+    filtered_dropped: int = 0,
+    pre_filter_count: int = 0,
+) -> bool:
     if not AICR_SELF_REFLECTION:
         return False
     threshold = AICR_REFLECTION_SCORE_THRESHOLD
     if score < threshold:
         return True
-    return any(
+    if any(
         str(i.get("severity", "")).lower() in _REFLECTION_SEVERITIES for i in issues
-    )
+    ):
+        return True
+    if filtered_dropped > 0 and pre_filter_count > 0 and not issues:
+        return True
+    return False
 
 
 def run_reflection(

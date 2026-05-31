@@ -55,6 +55,10 @@ MR Pipeline
 | Self-reflection | `AICR_SELF_REFLECTION=1` | 低分或 critical/major 时二次 LLM 校验 |
 | Reflection 分数阈值 | `AICR_REFLECTION_SCORE_THRESHOLD` | 默认与 `AICR_SCORE_THRESHOLD` 相同 |
 | 多语言 system 模板 | （内置） | 按扩展名选择 `system_spring` / `python` / `go` / `typescript` / `general` |
+| 过滤后分数 reconcile | （内置） | 丢弃 diff 外 issue 后按剩余 issue 重算分 |
+| Reflection 成本 | `AICR_SELF_REFLECTION=0` | 默认开启；大 MR 会多 1 次 LLM 调用，生产可关 |
+
+**提示词安全**：MR 标题/描述包在 `<untrusted_mr_metadata>` 中，system 要求忽略其中指令。
 
 ## API 增量 / 全量
 

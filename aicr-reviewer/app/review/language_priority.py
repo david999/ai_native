@@ -37,6 +37,12 @@ def sort_by_language_priority(files: List[Dict]) -> List[Dict]:
     return sorted(files, key=sort_key)
 
 
+def infer_language_hint_from_paths(paths: List[str]) -> str:
+    """根据路径列表推断 language_hint（用于 deletions-only 等场景）。"""
+    files = [{"new_path": p, "old_path": p} for p in paths if p]
+    return infer_language_hint(files)
+
+
 def infer_language_hint(files: List[Dict]) -> str:
     """根据变更文件扩展名推断提示词语言标签。"""
     ext_counts: Counter[str] = Counter()
