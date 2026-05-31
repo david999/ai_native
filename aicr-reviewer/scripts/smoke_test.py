@@ -119,6 +119,33 @@ def test_chunker_splits_chunks():
     print("OK chunker splits chunks")
 
 
+def test_paths_match_strict():
+    from app.review.diff_line_index import paths_match, _lookup_ranges, build_diff_line_index
+
+    assert paths_match("com/example/Foo.java", "com/example/Foo.java")
+    assert paths_match("com/example/Foo.java", "Foo.java")
+    assert not paths_match("com/example/Foo.java", "oo.java")
+
+    index = build_diff_line_index([{
+        "new_path": "com/example/Foo.java",
+        "diff": "@@ -1,1 +1,2 @@\n x\n+y\n",
+    }])
+    assert _lookup_ranges(index, "com/example/Foo.java") is not None
+    assert _lookup_ranges(index, "oo.java") is None
+    print("OK paths match strict")
+
+
+def test_filter_deleted_paths_allowed():
+    from app.review.diff_line_index import filter_issues_to_diff
+
+    issues = [{"file": "Removed.java", "line": 1, "message": "risk"}]
+    kept, dropped = filter_issues_to_diff(
+        issues, [], additional_allowed_paths=["Removed.java"]
+    )
+    assert len(kept) == 1 and dropped == []
+    print("OK filter deleted paths allowed")
+
+
 def test_diff_line_index():
     from app.review.diff_line_index import (
         parse_diff_new_line_ranges,
@@ -531,7 +558,13 @@ def test_orchestrator_deletions_only():
     llm.chat.return_value = json.dumps({
         "score": 85,
         "summary": "deletion ok",
-        "issues": [],
+        "issues": [{
+            "file": "Removed.java",
+            "line": 1,
+            "severity": "major",
+            "category": "security",
+            "message": "auth removed",
+        }],
     })
 
     ctx = MagicMock()
@@ -550,15 +583,43 @@ def test_orchestrator_deletions_only():
     orch = ReviewOrchestrator(MagicMock(), llm, MagicMock(), state_store=store)
     orch.context_builder.build = MagicMock(return_value=ctx)
 
-    with patch("app.review.orchestrator.REVIEW_DRY_RUN", False):
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", False), \
+         patch("app.review.reflection.AICR_SELF_REFLECTION", False):
         orch.publisher.publish_summary = MagicMock(return_value=True)
         result = orch.run(1, 5)
 
     assert result["review_completed"] is True
     assert result["score"] == 85.0
-    llm.chat.assert_called_once()
+    assert len(result["issues"]) == 1
+    assert result["issues"][0]["file"] == "Removed.java"
+    assert llm.chat.call_count == 1
     store.set_last_reviewed_sha.assert_called_once_with(1, 5, "abc123")
     print("OK orchestrator deletions only")
+
+
+def test_reflection_includes_diff_text():
+    from app.review.reflection import run_reflection
+    from app.review.prompt_renderer import PromptRenderer
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({"score": 80, "summary": "ok", "issues": []})
+    renderer = PromptRenderer()
+
+    run_reflection(
+        llm,
+        renderer,
+        MagicMock(parse=MagicMock(return_value={"score": 80, "summary": "ok", "issues": []})),
+        language_hint="Python",
+        context_md="",
+        mr_title="t",
+        mr_description="d",
+        diff_text="@@ -1 +1 @@\n+line\n",
+        initial={"score": 70, "summary": "x", "issues": []},
+    )
+
+    user_msg = llm.chat.call_args[0][0][1]["content"]
+    assert "@@ -1 +1 @@" in user_msg
+    print("OK reflection includes diff text")
 
 
 def test_mr_review_lock():
@@ -922,6 +983,8 @@ if __name__ == "__main__":
         test_parser_score_clamp,
         test_parser_embedded_json,
         test_parser_skips_non_dict_issues,
+        test_paths_match_strict,
+        test_filter_deleted_paths_allowed,
         test_diff_line_index,
         test_resolve_system_template,
         test_prompt_renderer_multilang,
@@ -944,6 +1007,7 @@ if __name__ == "__main__":
         test_chunker_single_tokenize_per_file,
         test_orchestrator_parallel_chunks,
         test_orchestrator_deletions_only,
+        test_reflection_includes_diff_text,
         test_mr_review_lock,
         test_review_mr_busy_409,
         test_orchestrator_success,

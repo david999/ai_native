@@ -36,6 +36,7 @@ def run_reflection(
     context_md: str,
     mr_title: str,
     mr_description: str,
+    diff_text: str,
     initial: Dict[str, Any],
 ) -> Dict[str, Any]:
     """对初评 JSON 做 reflection pass；失败时返回 initial。"""
@@ -46,6 +47,7 @@ def run_reflection(
     user_prompt = renderer.render_reflection_user(
         mr_title=mr_title,
         mr_description=mr_description,
+        diff_text=diff_text,
         initial_review_json=json.dumps(initial, ensure_ascii=False, indent=2),
     )
     messages = [

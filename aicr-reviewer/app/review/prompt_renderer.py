@@ -44,11 +44,13 @@ class PromptRenderer:
         *,
         mr_title: str = "",
         mr_description: str = "",
+        diff_text: str = "",
         initial_review_json: str = "",
     ) -> str:
         template = _env.get_template("reflection_user.j2")
         return template.render(
             mr_title=mr_title,
             mr_description=mr_description,
+            diff_text=diff_text,
             initial_review_json=initial_review_json,
         )

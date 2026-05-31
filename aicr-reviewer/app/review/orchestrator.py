@@ -195,23 +195,21 @@ class ReviewOrchestrator:
         all_summaries: list,
     ) -> tuple[float, list, list]:
         summaries = list(all_summaries)
+        filter_opts = self._diff_filter_options(ctx)
 
         if AICR_FILTER_ISSUES_TO_DIFF and all_issues:
-            kept, dropped = filter_issues_to_diff(all_issues, ctx.changed_files)
-            if dropped:
-                logger.info(
-                    f"Filtered {len(dropped)} issue(s) outside MR diff hunks"
-                )
-                summaries.append(
-                    f"Dropped {len(dropped)} issue(s) not in diff hunks"
-                )
-            all_issues = kept
+            all_issues, summaries = self._apply_diff_filter(
+                all_issues, ctx.changed_files, summaries, filter_opts
+            )
 
-        language_hint = infer_language_hint(ctx.changed_files)
+        language_hint = infer_language_hint(
+            ctx.changed_files or [{"new_path": p} for p in ctx.deleted_files]
+        )
         if should_reflect(min_score, all_issues):
+            diff_text = redact_secrets(self._diff_text_for_reflection(ctx))
             initial = {
                 "score": min_score,
-                "summary": summaries[-1] if summaries else "",
+                "summary": " | ".join(summaries) if summaries else "",
                 "issues": all_issues,
             }
             reflected = run_reflection(
@@ -222,6 +220,7 @@ class ReviewOrchestrator:
                 context_md=ctx.context_md,
                 mr_title=ctx.title,
                 mr_description=ctx.description,
+                diff_text=diff_text,
                 initial=initial,
             )
             min_score = float(reflected.get("score", min_score))
@@ -229,7 +228,48 @@ class ReviewOrchestrator:
             if reflected.get("summary"):
                 summaries.append(f"{reflected['summary']} (reflection)")
 
+            if AICR_FILTER_ISSUES_TO_DIFF and all_issues:
+                all_issues, summaries = self._apply_diff_filter(
+                    all_issues, ctx.changed_files, summaries, filter_opts,
+                    log_prefix="After reflection: ",
+                )
+
         return min_score, all_issues, summaries
+
+    @staticmethod
+    def _diff_filter_options(ctx: MRContext) -> dict:
+        """deletions-only 场景允许引用已删除路径的 issue。"""
+        return {"additional_allowed_paths": list(ctx.deleted_files or [])}
+
+    def _apply_diff_filter(
+        self,
+        issues: list,
+        changed_files: list,
+        summaries: list,
+        filter_opts: dict,
+        *,
+        log_prefix: str = "",
+    ) -> tuple[list, list]:
+        kept, dropped = filter_issues_to_diff(
+            issues,
+            changed_files,
+            additional_allowed_paths=filter_opts.get("additional_allowed_paths"),
+        )
+        if dropped:
+            logger.info(
+                f"{log_prefix}Filtered {len(dropped)} issue(s) outside MR diff hunks"
+            )
+            summaries = list(summaries)
+            summaries.append(
+                f"{log_prefix}Dropped {len(dropped)} issue(s) not in diff hunks"
+            )
+        return kept, summaries
+
+    def _diff_text_for_reflection(self, ctx: MRContext) -> str:
+        return self._build_diff_text(
+            ctx.changed_files,
+            deleted_files=ctx.deleted_files if ctx.deleted_files else None,
+        )
 
     def _build_chunks(self, ctx: MRContext) -> List[Dict]:
         chunks = self.chunker.chunk_files(ctx.changed_files)

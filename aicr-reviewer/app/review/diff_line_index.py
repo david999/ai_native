@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
+
+from app.review.parser import StructuredResponseParser
 
 _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
@@ -12,6 +14,17 @@ LineRange = Tuple[int, int]
 
 def _normalize_path(path: str) -> str:
     return (path or "").replace("\\", "/").lstrip("./")
+
+
+def paths_match(index_path: str, issue_path: str) -> bool:
+    """严格路径匹配：相等或一方为另一方的仓库相对子路径。"""
+    a = _normalize_path(index_path)
+    b = _normalize_path(issue_path)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return a.endswith("/" + b) or b.endswith("/" + a)
 
 
 def parse_diff_new_line_ranges(diff: str) -> List[LineRange]:
@@ -48,7 +61,6 @@ def parse_diff_new_line_ranges(diff: str) -> List[LineRange]:
         if line.startswith("+") or line.startswith(" "):
             hunk_end = new_line
             new_line += 1
-        # deletion-only lines in hunk do not advance new file line
 
     if in_hunk and hunk_end >= hunk_start:
         ranges.append((hunk_start, hunk_end))
@@ -94,22 +106,39 @@ def line_in_diff(line: int, ranges: List[LineRange]) -> bool:
     return any(start <= line <= end for start, end in ranges)
 
 
+def _lookup_ranges(index: Dict[str, List[LineRange]], issue_path: str) -> Optional[List[LineRange]]:
+    if issue_path in index:
+        return index[issue_path]
+    for key, rs in index.items():
+        if paths_match(key, issue_path):
+            return rs
+    return None
+
+
 def filter_issues_to_diff(
     issues: List[dict],
     changed_files: List[dict],
     *,
     allow_placeholder_paths: bool = True,
+    additional_allowed_paths: Optional[List[str]] = None,
 ) -> Tuple[List[dict], List[dict]]:
     """返回 (kept, dropped)。"""
     index = build_diff_line_index(changed_files)
+    allowed_paths: Set[str] = {
+        _normalize_path(p) for p in (additional_allowed_paths or []) if p
+    }
     kept: List[dict] = []
     dropped: List[dict] = []
 
     for issue in issues:
         path = _normalize_path(str(issue.get("file", "")))
-        line = int(issue.get("line") or 0)
+        line = StructuredResponseParser._safe_line(issue.get("line"))
 
         if allow_placeholder_paths and path.startswith("_aicr"):
+            kept.append(issue)
+            continue
+
+        if path in allowed_paths:
             kept.append(issue)
             continue
 
@@ -117,14 +146,7 @@ def filter_issues_to_diff(
             dropped.append(issue)
             continue
 
-        ranges = index.get(path)
-        if ranges is None:
-            # 尝试后缀匹配（模型有时省略目录）
-            for key, rs in index.items():
-                if key.endswith(path) or path.endswith(key):
-                    ranges = rs
-                    break
-
+        ranges = _lookup_ranges(index, path)
         if ranges and line_in_diff(line, ranges):
             kept.append(issue)
         else:
