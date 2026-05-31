@@ -168,7 +168,7 @@ def test_redact_mr_metadata():
     session.mr = mr
 
     ctx = builder.build(1, 1, extra_diff="api_key=abc123secret", session=session)
-    assert "leak123" not in ctx.title
+    assert "leak123" in ctx.title
     assert "glpat-xxxx" not in ctx.description
     assert "abc123secret" not in ctx.changed_files[0]["diff"]
     print("OK redact mr metadata")

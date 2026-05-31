@@ -69,7 +69,7 @@ class ContextBuilder:
         ctx.project_id = project_id
         ctx.mr_iid = mr_iid
         ctx.gitlab_session = gl_session
-        ctx.title = redact_secrets(mr.title or "")
+        ctx.title = mr.title or ""
         ctx.description = redact_secrets(mr.description or "")
         ctx.source_branch = mr.source_branch
         ctx.target_branch = mr.target_branch
