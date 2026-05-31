@@ -37,7 +37,7 @@
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构与评审流水线 |
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | **源码级详细说明**（模块、分支、数据结构） |
 | [docs/SECRETS.md](docs/SECRETS.md) | 密钥与环境变量说明 |
-| [docs/GITHUB_REFERENCES.md](docs/GITHUB_REFERENCES.md) | **外部 GitHub 项目参考说明**（是否借鉴及原因） |
+| [docs/GITHUB_REFERENCES.md](docs/GITHUB_REFERENCES.md) | **外部 GitHub 项目参考说明**（对比分析与可借鉴优化，见第 8 节） |
 
 ## 评审触发方式
 
