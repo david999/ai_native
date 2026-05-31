@@ -40,6 +40,13 @@
 | `REVIEW_MAX_INPUT_TOKENS` | `12000` | 每块 diff 估算 token 上限 |
 | `CONTEXT_MAX_CHARS` | `8000` | `.llm/CONTEXT.md` 截断长度 |
 | `REVIEW_DRY_RUN` | `0` | `1` 时不向 GitLab 发评论，仅返回 API 结果 |
+| `REVIEW_USE_TIKTOKEN` | `1` | `0` 时用字符÷4 估算 token |
+| `TIKTOKEN_ENCODING` | `cl100k_base` | tiktoken 编码名 |
+| `AICR_INCREMENTAL_REVIEW` | `1` | `0` 关闭增量 compare |
+| `AICR_FORCE_FULL_REVIEW` | `0` | `1` 强制全量 MR diff |
+| `AICR_STATE_DIR` | `evn/.aicr-state` | 增量状态目录（勿提交 Git） |
+
+CI 组合 **reviewdog + AICR** 见 [CI_REVIEW_PIPELINE.md](./CI_REVIEW_PIPELINE.md)。
 
 ## Webhook 调试
 

@@ -77,7 +77,11 @@ flowchart TB
 | `app/api/routes.py` | HTTP 路由、鉴权、异常到 HTTP 状态映射 |
 | `app/config.py` | 从 `evn/.env` 等加载环境变量 |
 | `app/gitlab/client.py` | GitLab Python SDK 单例 |
-| `app/gitlab/context_builder.py` | MR 上下文与文件列表 |
+| `app/gitlab/context_builder.py` | MR 上下文与文件列表（含增量 compare） |
+| `app/review/diff_compress.py` | diff 压缩与删除文件列表 |
+| `app/review/token_utils.py` | tiktoken / 字符回退计数 |
+| `app/review/language_priority.py` | 文件排序与 language_hint 推断 |
+| `app/review/review_state.py` | 上次评审 head SHA 持久化 |
 | `app/gitlab/publisher.py` | 评论与摘要发布 |
 | `app/llm/factory.py` | 按 `LLM_PROVIDER` 创建客户端 |
 | `app/llm/openai_compat.py` | OpenAI 兼容 Chat Completions |

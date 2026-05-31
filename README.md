@@ -31,6 +31,7 @@
 |------|------|
 | [docs/LOCAL_PC_VERIFICATION.md](docs/LOCAL_PC_VERIFICATION.md) | **本地 PC**：测试命令、启动服务、L1–L3 整体验收 |
 | [docs/TESTING.md](docs/TESTING.md) | 冒烟用例覆盖矩阵与 fail-open 说明 |
+| [docs/CI_REVIEW_PIPELINE.md](docs/CI_REVIEW_PIPELINE.md) | **CI 流水线**：reviewdog + AICR、增量评审与阶段 A 配置 |
 | [aicr-reviewer/README.md](aicr-reviewer/README.md) | 运行方式、API、失败策略 |
 | [docs/LLM_CODE_REVIEW.md](docs/LLM_CODE_REVIEW.md) | **大模型如何实现代码评审**（流程、提示词、接入与门禁） |
 | [docs/LLM_CODE_REVIEW.html](docs/LLM_CODE_REVIEW.html) | 同上（HTML 阅读版，含目录导航） |

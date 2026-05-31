@@ -119,6 +119,80 @@ def test_chunker_splits_chunks():
     print("OK chunker splits chunks")
 
 
+def test_diff_compress_deletion_only_hunk():
+    from app.review.diff_compress import compress_unified_diff
+
+    diff = (
+        "@@ -1,3 +1,2 @@\n"
+        " line\n"
+        "-removed\n"
+        "@@ -10,2 +10,3 @@\n"
+        " ctx\n"
+        "+added\n"
+    )
+    out = compress_unified_diff(diff)
+    assert "-removed" not in out or "+added" in out
+    assert "+added" in out
+    print("OK diff compress deletion-only hunk")
+
+
+def test_diff_compress_entire_file_delete():
+    from app.review.diff_compress import compress_changes
+
+    changes = [{
+        "old_path": "gone.java",
+        "new_path": "gone.java",
+        "deleted_file": True,
+        "diff": "@@ -1 +0,0 @@\n-old\n",
+    }]
+    files, deleted = compress_changes(changes)
+    assert files == []
+    assert deleted == ["gone.java"]
+    print("OK diff compress entire file delete")
+
+
+def test_language_priority_sort():
+    from app.review.language_priority import sort_by_language_priority, infer_language_hint
+
+    files = [
+        {"new_path": "README.md", "old_path": "README.md"},
+        {"new_path": "src/Main.java", "old_path": "src/Main.java"},
+        {"new_path": "src/Util.java", "old_path": "src/Util.java"},
+    ]
+    ordered = sort_by_language_priority(files)
+    assert ordered[0]["new_path"].endswith(".java")
+    hint = infer_language_hint([
+        {"new_path": "a.py", "old_path": "a.py"},
+        {"new_path": "b.py", "old_path": "b.py"},
+    ])
+    assert hint == "Python"
+    print("OK language priority")
+
+
+def test_review_state_store():
+    from pathlib import Path
+    from app.review.review_state import ReviewStateStore
+
+    base = Path(__file__).resolve().parents[1] / ".tmp-smoke-state"
+    base.mkdir(exist_ok=True)
+    store = ReviewStateStore(base_dir=base)
+    store.set_last_reviewed_sha(9, 3, "abc123def")
+    assert store.get_last_reviewed_sha(9, 3) == "abc123def"
+    store.clear(9, 3)
+    assert store.get_last_reviewed_sha(9, 3) is None
+    print("OK review state store")
+
+
+def test_token_utils_fallback():
+    from app.review import token_utils
+
+    token_utils.reset_encoder_cache()
+    with patch("app.review.token_utils.REVIEW_USE_TIKTOKEN", False):
+        n = token_utils.count_tokens("abcd" * 10)
+        assert n == 10
+    print("OK token utils fallback")
+
+
 def test_chunker_skips_unsupported():
     from app.review.chunker import DiffChunker
 
@@ -530,6 +604,11 @@ if __name__ == "__main__":
         test_parser_score_clamp,
         test_parser_embedded_json,
         test_parser_skips_non_dict_issues,
+        test_diff_compress_deletion_only_hunk,
+        test_diff_compress_entire_file_delete,
+        test_language_priority_sort,
+        test_review_state_store,
+        test_token_utils_fallback,
         test_chunker_truncation,
         test_chunker_splits_chunks,
         test_chunker_skips_unsupported,

@@ -1,8 +1,13 @@
 import logging
-from typing import Optional
+from typing import List, Optional, Tuple
 
-from app.config import CONTEXT_MAX_CHARS
+from app.config import (
+    AICR_FORCE_FULL_REVIEW,
+    AICR_INCREMENTAL_REVIEW,
+    CONTEXT_MAX_CHARS,
+)
 from app.gitlab.session import GitLabMRSession, gitlab_call
+from app.review.diff_compress import compress_changes
 from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
@@ -13,7 +18,6 @@ SUPPORTED_EXTENSIONS = (
     ".dockerfile", ".gradle", ".toml",
 )
 
-# 无扩展名但常见的容器/构建文件
 SPECIAL_FILENAMES = frozenset({"dockerfile", "makefile", "gemfile"})
 
 
@@ -33,8 +37,9 @@ def _is_supported_path(new_path: str, old_path: str) -> bool:
 class MRContext:
     __slots__ = (
         "project_id", "mr_iid", "title", "description",
-        "source_branch", "target_branch", "diff_refs",
-        "changes", "context_md", "changed_files", "gitlab_session",
+        "source_branch", "target_branch", "diff_refs", "head_sha",
+        "changes", "context_md", "changed_files", "deleted_files",
+        "incremental_from_sha", "gitlab_session",
     )
 
     def __init__(self):
@@ -45,14 +50,22 @@ class MRContext:
         self.source_branch: str = ""
         self.target_branch: str = ""
         self.diff_refs: Optional[dict] = None
+        self.head_sha: str = ""
         self.changes: list = []
         self.context_md: str = ""
         self.changed_files: list = []
+        self.deleted_files: list = []
+        self.incremental_from_sha: Optional[str] = None
         self.gitlab_session: Optional[GitLabMRSession] = None
 
 
 class ContextBuilder:
     """拉取 MR 变更列表，过滤 SUPPORTED_EXTENSIONS，并加载项目 LLM 上下文文档。"""
+
+    def __init__(self, state_store=None):
+        from app.review.review_state import ReviewStateStore
+
+        self._state_store = state_store or ReviewStateStore()
 
     def build(
         self,
@@ -60,6 +73,8 @@ class ContextBuilder:
         mr_iid: int,
         extra_diff: str = "",
         session: Optional[GitLabMRSession] = None,
+        *,
+        force_full: bool = False,
     ) -> MRContext:
         gl_session = session or GitLabMRSession(project_id, mr_iid)
         project = gl_session.project
@@ -74,12 +89,19 @@ class ContextBuilder:
         ctx.source_branch = mr.source_branch
         ctx.target_branch = mr.target_branch
         ctx.diff_refs = mr.diff_refs
+        ctx.head_sha = self._resolve_head_sha(mr)
 
-        changes_data = gitlab_call(lambda: mr.changes())
-        ctx.changes = changes_data.get("changes", [])
+        raw_changes, incremental_from = self._fetch_changes(
+            project, mr, gl_session, force_full=force_full
+        )
+        ctx.incremental_from_sha = incremental_from
+        ctx.changes = raw_changes
+
+        compressed, deleted_paths = compress_changes(raw_changes)
+        ctx.deleted_files = deleted_paths
 
         ctx.changed_files = []
-        for change in ctx.changes:
+        for change in compressed:
             new_path = change.get("new_path") or ""
             old_path = change.get("old_path") or ""
             diff_text = redact_secrets(change.get("diff", ""))
@@ -118,11 +140,71 @@ class ContextBuilder:
 
         ctx.context_md = redact_secrets(self._load_context_md(project, mr))
 
+        mode = "incremental" if incremental_from else "full"
         logger.info(
-            f"MR !{mr_iid} context: {len(ctx.changed_files)} files, "
-            f"context_md={len(ctx.context_md)} chars"
+            f"MR !{mr_iid} context ({mode}): {len(ctx.changed_files)} files, "
+            f"deleted={len(ctx.deleted_files)}, context_md={len(ctx.context_md)} chars"
         )
         return ctx
+
+    @staticmethod
+    def _resolve_head_sha(mr) -> str:
+        refs = mr.diff_refs or {}
+        head = refs.get("head_sha") or getattr(mr, "sha", None) or ""
+        return str(head)
+
+    def _fetch_changes(
+        self,
+        project,
+        mr,
+        gl_session: GitLabMRSession,
+        *,
+        force_full: bool,
+    ) -> Tuple[list, Optional[str]]:
+        head_sha = self._resolve_head_sha(mr)
+        use_incremental = (
+            AICR_INCREMENTAL_REVIEW
+            and not force_full
+            and not AICR_FORCE_FULL_REVIEW
+            and bool(head_sha)
+        )
+
+        if use_incremental:
+            last_sha = self._state_store.get_last_reviewed_sha(
+                gl_session.project_id, gl_session.mr_iid
+            )
+            if last_sha and last_sha != head_sha:
+                try:
+                    compare = gitlab_call(
+                        lambda: project.repository_compare(last_sha, head_sha)
+                    )
+                    diffs = compare.get("diffs") or []
+                    if diffs:
+                        logger.info(
+                            f"Incremental compare {last_sha[:8]}..{head_sha[:8]}: "
+                            f"{len(diffs)} file(s)"
+                        )
+                        return self._compare_diffs_to_changes(diffs), last_sha
+                    logger.info("Incremental compare returned no diffs; using full MR")
+                except Exception as e:
+                    logger.warning(f"Incremental compare failed, full MR review: {e}")
+
+        changes_data = gitlab_call(lambda: mr.changes())
+        return changes_data.get("changes", []), None
+
+    @staticmethod
+    def _compare_diffs_to_changes(diffs: list) -> list:
+        changes = []
+        for d in diffs:
+            changes.append({
+                "old_path": d.get("old_path") or "",
+                "new_path": d.get("new_path") or "",
+                "diff": d.get("diff") or "",
+                "new_file": d.get("new_file", False),
+                "renamed_file": d.get("renamed_file", False),
+                "deleted_file": d.get("deleted_file", False),
+            })
+        return changes
 
     def _load_context_md(self, project, mr) -> str:
         for ref in (mr.source_branch, mr.target_branch):

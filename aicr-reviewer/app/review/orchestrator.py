@@ -8,8 +8,10 @@ from app.gitlab.publisher import GitLabPublisher
 from app.gitlab.session import GitLabMRSession
 from app.llm.base import LLMProvider
 from app.review.chunker import DiffChunker
+from app.review.language_priority import infer_language_hint
 from app.review.prompt_renderer import PromptRenderer
 from app.review.parser import StructuredResponseParser, ParseError
+from app.review.review_state import ReviewStateStore
 from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
@@ -21,20 +23,29 @@ class ReviewOrchestrator:
         context_builder: ContextBuilder,
         llm_provider: LLMProvider,
         publisher: GitLabPublisher,
+        state_store: ReviewStateStore | None = None,
     ):
         self.context_builder = context_builder
         self.llm = llm_provider
         self.publisher = publisher
+        self.state_store = state_store or ReviewStateStore()
         self.chunker = DiffChunker()
         self.renderer = PromptRenderer()
         self.parser = StructuredResponseParser()
 
-    def run(self, project_id: int, mr_iid: int, extra_diff: str = "") -> Dict[str, Any]:
+    def run(
+        self,
+        project_id: int,
+        mr_iid: int,
+        extra_diff: str = "",
+        *,
+        force_full: bool = False,
+    ) -> Dict[str, Any]:
         logger.info(f"Starting review for project={project_id} MR !{mr_iid}")
 
         gl_session = GitLabMRSession(project_id, mr_iid)
         ctx: MRContext = self.context_builder.build(
-            project_id, mr_iid, extra_diff, session=gl_session
+            project_id, mr_iid, extra_diff, session=gl_session, force_full=force_full
         )
         chunks = self.chunker.chunk_files(ctx.changed_files)
 
@@ -81,6 +92,9 @@ class ReviewOrchestrator:
 
         review_completed = review_completed and publish_ok
 
+        if review_completed and ctx.head_sha and not REVIEW_DRY_RUN:
+            self.state_store.set_last_reviewed_sha(project_id, mr_iid, ctx.head_sha)
+
         logger.info(
             f"Review complete: score={final_score}, issues={len(all_issues)}, "
             f"review_completed={review_completed}"
@@ -96,13 +110,21 @@ class ReviewOrchestrator:
     def _review_chunk(
         self, ctx: MRContext, chunk: Dict, chunk_index: int = 0, total_chunks: int = 1
     ) -> Dict[str, Any]:
+        language_hint = infer_language_hint(ctx.changed_files)
         system_prompt = self.renderer.render_system(
             context_md=ctx.context_md,
-            language_hint="Java/Spring",
+            language_hint=language_hint,
         )
 
         changed_files_summary = self._files_summary(chunk["files"])
-        diff_text = redact_secrets(self._build_diff_text(chunk["files"]))
+        diff_text = redact_secrets(
+            self._build_diff_text(chunk["files"], deleted_files=ctx.deleted_files)
+        )
+        if ctx.incremental_from_sha:
+            diff_text = (
+                f"(Incremental review since `{ctx.incremental_from_sha[:8]}`)\n\n"
+                + diff_text
+            )
 
         chunk_note = ""
         if total_chunks > 1:
@@ -186,8 +208,11 @@ class ReviewOrchestrator:
         return "\n".join(lines)
 
     @staticmethod
-    def _build_diff_text(files: list) -> str:
+    def _build_diff_text(files: list, deleted_files: list | None = None) -> str:
         parts = []
+        if deleted_files:
+            lines = "\n".join(f"- `{p}`" for p in deleted_files)
+            parts.append(f"## Deleted files (no patch hunks)\n{lines}")
         for f in files:
             path = f.get("new_path") or f.get("old_path") or "?"
             header = f"diff --git a/{path} b/{path}"

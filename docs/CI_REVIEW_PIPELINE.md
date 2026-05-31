@@ -1,0 +1,53 @@
+# CI 评审流水线（阶段 A）
+
+本文说明如何在 GitLab MR 流水线中组合 **reviewdog**（确定性 linter）与 **AICR Reviewer**（LLM 语义评审）。
+
+## 推荐顺序
+
+```text
+MR Pipeline
+  ├─ (可选) reviewdog-*     ← ESLint / golangci / 等，仅评论 diff 内问题
+  └─ aicr-review            ← POST /review，分数门禁见 ci_review_gate.sh
+```
+
+| 步骤 | 工具 | 作用 |
+|------|------|------|
+| 1 | [reviewdog](https://github.com/reviewdog/reviewdog) | 将 linter 结果发到 `gitlab-mr-discussion`，成本低、可重复 |
+| 2 | AICR | 架构/业务/安全语义评审；`review_completed=true` 且低分时拦 MR |
+
+## reviewdog 要点
+
+- Reporter：`-reporter=gitlab-mr-discussion`
+- Token：`REVIEWDOG_GITLAB_API_TOKEN`（`api` scope PAT）
+- 在 MR 中只展示 **diff 范围内** 的发现，噪声低于全文件扫描
+
+示例片段见 [aicr-reviewer/ci/gitlab-ci.snippet.yml](../aicr-reviewer/ci/gitlab-ci.snippet.yml) 中注释块。
+
+## AICR 阶段 A 能力
+
+| 能力 | 环境变量 | 说明 |
+|------|----------|------|
+| tiktoken 分块 | `REVIEW_USE_TIKTOKEN=1`（默认） | `REVIEW_MAX_INPUT_TOKENS` 按 token 装箱 |
+| diff 压缩 | （内置） | 剔除 deletion-only hunks；整文件删除合并列表 |
+| 增量评审 | `AICR_INCREMENTAL_REVIEW=1`（默认） | 对比上次成功评审的 `head_sha`，仅评新 commit |
+| 状态目录 | `AICR_STATE_DIR` | 默认 `evn/.aicr-state/`（勿提交 Git） |
+| 强制全量 | `AICR_FORCE_FULL_REVIEW=1` 或 API `force_full: true` | 忽略增量 compare |
+
+增量状态在 **评审成功且发布成功**（`review_completed=true`）后写入；`REVIEW_DRY_RUN=1` 时不更新。
+
+## API 增量 / 全量
+
+```json
+POST /review
+{
+  "project_id": 1,
+  "mr_iid": 12,
+  "force_full": false
+}
+```
+
+## 相关文档
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md)
+- [TESTING.md](./TESTING.md)
+- [SECRETS.md](./SECRETS.md)

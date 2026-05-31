@@ -1,14 +1,42 @@
 # 将以下 job 合并到业务仓库 .gitlab-ci.yml（MR 流水线）
 #
+# 推荐顺序（阶段 A）：先 reviewdog（确定性 linter）→ 再 AICR（LLM 语义评审）
+#
 # 变量（GitLab CI/CD Settings）:
 #   AICR_REVIEW_URL          评审服务地址
 #   AICR_REVIEW_SECRET       与 REVIEW_API_SECRET 一致（可选）
 #   AICR_SCORE_THRESHOLD     默认 60
+#   REVIEWDOG_GITLAB_API_TOKEN  GitLab PAT（api），供 reviewdog 发 discussion
+
+# --- 可选：reviewdog + ESLint（Node 项目示例；按栈替换 linter）---
+# reviewdog-eslint:
+#   stage: test
+#   image: node:20-alpine
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+#   variables:
+#     REVIEWDOG_GITLAB_API_TOKEN: $GITLAB_TOKEN
+#   before_script:
+#     - apk add --no-cache curl git
+#     - curl -sfL https://raw.githubusercontent.com/reviewdog/reviewdog/master/install.sh | sh -s
+#   script:
+#     - npm ci
+#     - npm run lint -- -f checkstyle -o eslint-report.xml || true
+#     - |
+#       if [ -s eslint-report.xml ]; then
+#         reviewdog -f=checkstyle -name=eslint -reporter=gitlab-mr-discussion < eslint-report.xml
+#       else
+#         echo "No eslint report; skip reviewdog"
+#       fi
+#   allow_failure: true
 
 aicr-review:
   stage: test
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  # needs:
+  #   - job: reviewdog-eslint
+  #     optional: true
   script:
     - bash "${CI_PROJECT_DIR}/aicr-reviewer/scripts/ci_review_gate.sh"
   allow_failure: false

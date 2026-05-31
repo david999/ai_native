@@ -6,6 +6,7 @@ from typing import List, Dict
 
 from app.config import (
     AICR_BOT_TOKEN,
+    AICR_INCREMENTAL_REVIEW,
     GITLAB_WEBHOOK_SECRET,
     GITLAB_WEBHOOK_ALLOW_INSECURE,
     LLM_API_KEY,
@@ -33,6 +34,7 @@ class ReviewRequest(BaseModel):
     project_id: int
     mr_iid: int
     diff: str = ""
+    force_full: bool = False
 
 
 class ReviewResult(BaseModel):
@@ -82,7 +84,13 @@ def _verify_review_auth(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def _run_orchestrator(project_id: int, mr_iid: int, extra_diff: str = "") -> dict:
+def _run_orchestrator(
+    project_id: int,
+    mr_iid: int,
+    extra_diff: str = "",
+    *,
+    force_full: bool = False,
+) -> dict:
     if not AICR_BOT_TOKEN:
         raise HTTPException(status_code=500, detail="AICR_BOT_TOKEN is not configured")
 
@@ -96,7 +104,12 @@ def _run_orchestrator(project_id: int, mr_iid: int, extra_diff: str = "") -> dic
         llm_provider=llm,
         publisher=GitLabPublisher(),
     )
-    return orchestrator.run(project_id=project_id, mr_iid=mr_iid, extra_diff=extra_diff)
+    return orchestrator.run(
+        project_id=project_id,
+        mr_iid=mr_iid,
+        extra_diff=extra_diff,
+        force_full=force_full,
+    )
 
 
 @router.get("/health")
@@ -117,6 +130,7 @@ def health_detail():
         "review_auth_required": bool(REVIEW_API_SECRET),
         "review_api_allow_insecure": REVIEW_API_ALLOW_INSECURE,
         "review_max_concurrent": REVIEW_MAX_CONCURRENT,
+        "incremental_review": AICR_INCREMENTAL_REVIEW,
     }
 
 
@@ -131,7 +145,9 @@ def review(req: ReviewRequest, request: Request):
 
     try:
         try:
-            result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
+            result = _run_orchestrator(
+                req.project_id, req.mr_iid, req.diff, force_full=req.force_full
+            )
         except NoReviewableChangesError as e:
             logger.info(f"No reviewable changes: {e}")
             return ReviewResult(

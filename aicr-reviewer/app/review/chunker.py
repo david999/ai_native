@@ -4,54 +4,66 @@ import logging
 from typing import List, Dict
 
 from app.config import REVIEW_MAX_INPUT_TOKENS
+from app.review.language_priority import sort_by_language_priority
+from app.review.token_utils import count_tokens
 
 logger = logging.getLogger("aicr")
 
-# 粗略估算：1 token ≈ 4 字符（中英文混合场景下的保守值）
-APPROX_CHARS_PER_TOKEN = 4
-
 
 class DiffChunker:
-    """按 REVIEW_MAX_INPUT_TOKENS 将 supported 文件打包成多块，单文件超大时截断 diff。"""
+    """按 REVIEW_MAX_INPUT_TOKENS 将 supported 文件打包成多块；单文件超大时截断 diff。"""
 
     def chunk_files(self, changed_files: List[Dict]) -> List[Dict]:
-        max_chars = REVIEW_MAX_INPUT_TOKENS * APPROX_CHARS_PER_TOKEN
+        supported = [f for f in changed_files if f.get("is_supported")]
+        ordered = sort_by_language_priority(supported)
+        max_tokens = REVIEW_MAX_INPUT_TOKENS
+
         chunks: List[Dict] = []
         current_files: List[Dict] = []
-        current_chars = 0
+        current_tokens = 0
 
-        for f in changed_files:
-            if not f.get("is_supported"):
-                continue
+        for f in ordered:
+            file_entry = self._maybe_truncate_file(f, max_tokens)
+            file_tokens = count_tokens(self._file_text(file_entry))
 
-            file_entry = self._maybe_truncate_file(f, max_chars)
-            file_text = self._file_text(file_entry)
-            file_chars = len(file_text)
-
-            if current_chars + file_chars > max_chars and current_files:
-                chunks.append({"files": current_files, "total_chars": current_chars})
+            if current_tokens + file_tokens > max_tokens and current_files:
+                chunks.append({
+                    "files": current_files,
+                    "total_chars": self._total_chars(current_files),
+                    "total_tokens": current_tokens,
+                })
                 current_files = []
-                current_chars = 0
+                current_tokens = 0
 
             current_files.append(file_entry)
-            current_chars += file_chars
+            current_tokens += file_tokens
 
         if current_files:
-            chunks.append({"files": current_files, "total_chars": current_chars})
+            chunks.append({
+                "files": current_files,
+                "total_chars": self._total_chars(current_files),
+                "total_tokens": current_tokens,
+            })
 
         logger.info(
-            f"Split {len(changed_files)} files into {len(chunks)} chunk(s)"
+            f"Split {len(changed_files)} files into {len(chunks)} chunk(s) "
+            f"(token budget={max_tokens})"
         )
         return chunks
 
-    @staticmethod
-    def _maybe_truncate_file(f: Dict, max_chars: int) -> Dict:
-        file_text = DiffChunker._file_text(f)
-        if len(file_text) <= max_chars:
+    def _maybe_truncate_file(self, f: Dict, max_tokens: int) -> Dict:
+        file_text = self._file_text(f)
+        file_tokens = count_tokens(file_text)
+        if file_tokens <= max_tokens:
             return f
+
+        path = f.get("new_path") or f.get("old_path") or "?"
         logger.warning(
-            f"Truncating {f.get('new_path', '?')} from {len(file_text)} to {max_chars} chars"
+            f"Truncating {path} from ~{file_tokens} to ~{max_tokens} tokens"
         )
+        # 按字符比例粗截断 diff，再交给 tokenizer 在下一 chunk 边界处理
+        ratio = max_tokens / max(file_tokens, 1)
+        max_chars = max(500, int(len(file_text) * ratio * 0.95))
         truncated_diff = (f.get("diff") or "")[:max_chars]
         return {
             **f,
@@ -67,3 +79,7 @@ class DiffChunker:
         if f.get("content"):
             parts.append(f"\n# Full file content:\n{f['content']}")
         return "\n".join(parts)
+
+    @staticmethod
+    def _total_chars(files: List[Dict]) -> int:
+        return sum(len(DiffChunker._file_text(f)) for f in files)
