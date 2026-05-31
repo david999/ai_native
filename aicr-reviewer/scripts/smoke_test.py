@@ -40,6 +40,55 @@ def test_parser():
     print("OK parser")
 
 
+def test_parser_markdown_fence():
+    from app.review.parser import StructuredResponseParser
+
+    raw = """```json
+{"score": 80, "summary": "ok", "issues": []}
+```"""
+    result = StructuredResponseParser().parse(raw)
+    assert result["score"] == 80.0
+    print("OK parser markdown fence")
+
+
+def test_parser_score_clamp():
+    from app.review.parser import StructuredResponseParser
+
+    high = json.dumps({"score": 150, "summary": "x", "issues": []})
+    low = json.dumps({"score": -10, "summary": "x", "issues": []})
+    assert StructuredResponseParser().parse(high)["score"] == 100.0
+    assert StructuredResponseParser().parse(low)["score"] == 0.0
+    print("OK parser score clamp")
+
+
+def test_parser_embedded_json():
+    from app.review.parser import StructuredResponseParser
+
+    raw = (
+        "Here is the review:\n"
+        '{"score": 72, "summary": "embedded", "issues": []}\n'
+        "Thanks."
+    )
+    result = StructuredResponseParser().parse(raw)
+    assert result["score"] == 72.0
+    assert result["summary"] == "embedded"
+    print("OK parser embedded json")
+
+
+def test_parser_skips_non_dict_issues():
+    from app.review.parser import StructuredResponseParser
+
+    raw = json.dumps({
+        "score": 90,
+        "summary": "mixed issues",
+        "issues": ["skip-me", {"file": "a.java", "line": 1, "message": "ok"}],
+    })
+    result = StructuredResponseParser().parse(raw)
+    assert len(result["issues"]) == 1
+    assert result["issues"][0]["file"] == "a.java"
+    print("OK parser skips non-dict issues")
+
+
 def test_chunker_truncation():
     from app.review.chunker import DiffChunker
 
@@ -49,6 +98,39 @@ def test_chunker_truncation():
     assert len(chunks) == 1
     assert "[truncated" in chunks[0]["files"][0]["diff"]
     print("OK chunker truncation")
+
+
+def test_chunker_splits_chunks():
+    from app.review.chunker import DiffChunker
+
+    files = [
+        {
+            "new_path": f"File{i}.java",
+            "old_path": f"File{i}.java",
+            "diff": "x" * 30000,
+            "content": "",
+            "is_supported": True,
+        }
+        for i in range(3)
+    ]
+    with patch("app.review.chunker.REVIEW_MAX_INPUT_TOKENS", 1000):
+        chunks = DiffChunker().chunk_files(files)
+    assert len(chunks) >= 2
+    print("OK chunker splits chunks")
+
+
+def test_chunker_skips_unsupported():
+    from app.review.chunker import DiffChunker
+
+    files = [
+        {"new_path": "a.java", "old_path": "a.java", "diff": "+a", "is_supported": True},
+        {"new_path": "README.md", "old_path": "README.md", "diff": "+b", "is_supported": False},
+    ]
+    chunks = DiffChunker().chunk_files(files)
+    assert len(chunks) == 1
+    assert len(chunks[0]["files"]) == 1
+    assert chunks[0]["files"][0]["new_path"] == "a.java"
+    print("OK chunker skips unsupported")
 
 
 def test_empty_chunks():
@@ -138,6 +220,51 @@ def test_partial_chunk_incomplete():
     print("OK partial chunk incomplete")
 
 
+def test_orchestrator_success():
+    from app.review.orchestrator import ReviewOrchestrator
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({
+        "score": 88,
+        "summary": "looks good",
+        "issues": [{
+            "file": "Svc.java",
+            "line": 10,
+            "severity": "warning",
+            "category": "style",
+            "message": "rename",
+            "suggestion": "use verb",
+        }],
+    })
+
+    ctx = MagicMock()
+    ctx.changed_files = [{
+        "new_path": "Svc.java",
+        "old_path": "Svc.java",
+        "diff": "+code",
+        "content": "",
+        "is_supported": True,
+    }]
+    ctx.context_md = ""
+    ctx.title = "feat"
+    ctx.description = ""
+    ctx.project_id = 1
+    ctx.mr_iid = 2
+    ctx.diff_refs = None
+
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", True):
+        result = orch.run(1, 2)
+
+    assert result["review_completed"] is True
+    assert result["score"] == 88.0
+    assert len(result["issues"]) == 1
+    assert result["code_quality"][0]["check_name"] == "aicr-review"
+    print("OK orchestrator success")
+
+
 def test_redact():
     from app.utils.redact import redact_secrets
     text = 'password=secret123\nglpat-abc.def.01'
@@ -145,6 +272,26 @@ def test_redact():
     assert "secret123" not in out
     assert "glpat-abc" not in out
     print("OK redact")
+
+
+def test_redact_aws_key():
+    from app.utils.redact import redact_secrets
+
+    text = "key=AKIAIOSFODNN7EXAMPLE"
+    out = redact_secrets(text)
+    assert "AKIAIOSFODNN7EXAMPLE" not in out
+    assert "AKIA***REDACTED***" in out
+    print("OK redact aws key")
+
+
+def test_supported_extensions():
+    from app.gitlab.context_builder import _is_supported_path
+
+    assert _is_supported_path("src/Main.java", "")
+    assert _is_supported_path("", "Dockerfile")
+    assert _is_supported_path("README.md", "README.md") is False
+    assert _is_supported_path("pkg/main.kt", "") is True
+    print("OK supported extensions")
 
 
 def test_redact_mr_metadata():
@@ -192,6 +339,20 @@ def test_health_minimal():
     print("OK health minimal")
 
 
+def test_health_detail():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    resp = client.get("/health/detail")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert "gitlab_url" in body
+    assert "review_max_concurrent" in body
+    print("OK health detail")
+
+
 def test_review_fail_open():
     from fastapi.testclient import TestClient
     from main import app
@@ -210,6 +371,25 @@ def test_review_fail_open():
     print("OK review fail-open")
 
 
+def test_review_no_reviewable_changes():
+    from fastapi.testclient import TestClient
+    from main import app
+    from app.exceptions import NoReviewableChangesError
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", ""), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", True), \
+         patch("app.api.routes._run_orchestrator",
+               side_effect=NoReviewableChangesError("only markdown")):
+        resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["review_completed"] is False
+    assert body["score"] == 100.0
+    assert "only markdown" in body["summary"]
+    print("OK review no reviewable changes")
+
+
 def test_review_auth_returns_401():
     from fastapi.testclient import TestClient
     from main import app
@@ -220,6 +400,31 @@ def test_review_auth_returns_401():
         resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
     assert resp.status_code == 401
     print("OK auth returns 401")
+
+
+def test_review_bearer_auth_ok():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", "bearer-secret"), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", False), \
+         patch("app.api.routes._run_orchestrator", return_value={
+             "score": 75.0,
+             "issues": [],
+             "summary": "done",
+             "review_completed": True,
+             "code_quality": [],
+         }):
+        resp = client.post(
+            "/review",
+            json={"project_id": 1, "mr_iid": 1},
+            headers={"Authorization": "Bearer bearer-secret"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["review_completed"] is True
+    assert resp.json()["score"] == 75.0
+    print("OK bearer auth ok")
 
 
 def test_review_secret_not_configured():
@@ -234,17 +439,122 @@ def test_review_secret_not_configured():
     print("OK secret not configured 503")
 
 
+def test_review_concurrency_503():
+    from fastapi.testclient import TestClient
+    from main import app
+    from app.api.concurrency import ReviewCapacityError
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", ""), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", True), \
+         patch("app.api.routes.acquire_review_slot",
+               side_effect=ReviewCapacityError("max=2")):
+        resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
+    assert resp.status_code == 503
+    print("OK review concurrency 503")
+
+
+def test_webhook_ignored():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", ""), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", True):
+        resp = client.post(
+            "/webhook/gitlab",
+            json={"object_kind": "push", "project": {"id": 1}},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ignored"
+    print("OK webhook ignored")
+
+
+def test_webhook_unauthorized():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", "hook-secret"), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False):
+        resp = client.post(
+            "/webhook/gitlab",
+            json={"object_kind": "merge_request"},
+            headers={"X-Gitlab-Token": "wrong"},
+        )
+    assert resp.status_code == 401
+    print("OK webhook unauthorized")
+
+
+def test_webhook_accepted():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "merge_request",
+        "object_attributes": {"action": "open", "iid": 9},
+        "project": {"id": 42},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", "hook-secret"), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False):
+        resp = client.post(
+            "/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "hook-secret"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "accepted"
+    assert body["project_id"] == 42
+    assert body["mr_iid"] == 9
+    print("OK webhook accepted")
+
+
+def test_llm_factory_missing_key():
+    from app.llm.factory import create_llm_provider
+
+    with patch("app.llm.factory.LLM_API_KEY", ""):
+        try:
+            create_llm_provider()
+            assert False, "expected ValueError"
+        except ValueError as e:
+            assert "LLM_API_KEY" in str(e)
+    print("OK llm factory missing key")
+
+
 if __name__ == "__main__":
-    test_parser()
-    test_chunker_truncation()
-    test_empty_chunks()
-    test_llm_failure_raises()
-    test_partial_chunk_incomplete()
-    test_redact()
-    test_redact_mr_metadata()
-    test_health_import()
-    test_health_minimal()
-    test_review_fail_open()
-    test_review_auth_returns_401()
-    test_review_secret_not_configured()
-    print("All smoke tests passed.")
+    tests = [
+        test_parser,
+        test_parser_markdown_fence,
+        test_parser_score_clamp,
+        test_parser_embedded_json,
+        test_parser_skips_non_dict_issues,
+        test_chunker_truncation,
+        test_chunker_splits_chunks,
+        test_chunker_skips_unsupported,
+        test_empty_chunks,
+        test_llm_failure_raises,
+        test_partial_chunk_incomplete,
+        test_orchestrator_success,
+        test_redact,
+        test_redact_aws_key,
+        test_supported_extensions,
+        test_redact_mr_metadata,
+        test_health_import,
+        test_health_minimal,
+        test_health_detail,
+        test_review_fail_open,
+        test_review_no_reviewable_changes,
+        test_review_auth_returns_401,
+        test_review_bearer_auth_ok,
+        test_review_secret_not_configured,
+        test_review_concurrency_503,
+        test_webhook_ignored,
+        test_webhook_unauthorized,
+        test_webhook_accepted,
+        test_llm_factory_missing_key,
+    ]
+    for fn in tests:
+        fn()
+    print(f"All {len(tests)} smoke tests passed.")
