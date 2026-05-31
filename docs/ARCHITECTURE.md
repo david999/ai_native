@@ -67,7 +67,11 @@ flowchart TB
    - 多块取 **最低分** 作为最终分数。
    - 合并所有 `issues`；部分块失败时记录摘要，全部失败则抛 `LLMReviewError`。
 
-5. **发布**（`GitLabPublisher`，`REVIEW_DRY_RUN=0` 时）
+5. **Finalize**（`_finalize_findings`）
+   - 按 diff hunk 过滤 issue；`reconcile_score` 与剩余 issue 对齐分数。
+   - 可选 self-reflection；reflection 后再次过滤。
+
+6. **发布**（`GitLabPublisher`，`REVIEW_DRY_RUN=0` 时）
    - 每条 issue：优先行内 discussion，失败则回退为 MR note。
    - 发布总分摘要 note（与 `AICR_SCORE_THRESHOLD` 比较 PASSED/FAILED）。
 
@@ -83,6 +87,10 @@ flowchart TB
 | `app/review/token_utils.py` | tiktoken / 字符回退计数 |
 | `app/review/language_priority.py` | 文件排序与 language_hint 推断 |
 | `app/review/review_state.py` | 上次评审 head SHA 持久化 |
+| `app/review/diff_line_index.py` | 解析 diff hunk，过滤行内评论行号 |
+| `app/review/reflection.py` | Self-reflection 二次校验 |
+| `app/review/score_utils.py` | 过滤后分数 reconcile |
+| `app/review/prompts/system_*.j2` | 多语言 system 模板 |
 | `app/gitlab/publisher.py` | 评论与摘要发布 |
 | `app/llm/factory.py` | 按 `LLM_PROVIDER` 创建客户端 |
 | `app/llm/openai_compat.py` | OpenAI 兼容 Chat Completions |

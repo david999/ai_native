@@ -48,6 +48,9 @@
 | `AICR_FETCH_FULL_FILE` | `1` | `0` 时不拉取源分支全文 |
 | `AICR_FETCH_FULL_FILE_ON_INCREMENTAL` | `0` | `1` 时增量 compare 也拉全文 |
 | `REVIEW_CHUNK_MAX_WORKERS` | `2` | 多块 MR 并行 LLM 调用上限（`1`=串行） |
+| `AICR_FILTER_ISSUES_TO_DIFF` | `1` | `0` 关闭「仅 diff hunk 内 issue」过滤 |
+| `AICR_SELF_REFLECTION` | `1` | `0` 关闭二次 reflection LLM 调用 |
+| `AICR_REFLECTION_SCORE_THRESHOLD` | 同 `AICR_SCORE_THRESHOLD` | 低于该分或存在 critical/major 时触发 reflection |
 
 CI 组合 **reviewdog + AICR** 见 [CI_REVIEW_PIPELINE.md](./CI_REVIEW_PIPELINE.md)。
 

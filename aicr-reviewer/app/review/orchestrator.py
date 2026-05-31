@@ -2,7 +2,15 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Union
 
-from app.config import REVIEW_DRY_RUN, REVIEW_CHUNK_MAX_WORKERS, SCORE_THRESHOLD
+from app.config import (
+    AICR_FILTER_ISSUES_TO_DIFF,
+    REVIEW_CHUNK_MAX_WORKERS,
+    REVIEW_DRY_RUN,
+    SCORE_THRESHOLD,
+)
+from app.review.diff_line_index import filter_issues_to_diff
+from app.review.reflection import run_reflection, should_reflect
+from app.review.score_utils import reconcile_score
 from app.exceptions import LLMReviewError, NoReviewableChangesError
 from app.gitlab.context_builder import ContextBuilder, MRContext, _is_supported_path
 from app.gitlab.publisher import GitLabPublisher
@@ -81,7 +89,9 @@ class ReviewOrchestrator:
                 f"{'; '.join(llm_failures)}"
             )
 
-        final_score = min_score
+        final_score, all_issues, all_summaries = self._finalize_findings(
+            ctx, min_score, all_issues, all_summaries
+        )
         summary = " | ".join(all_summaries) if all_summaries else "Review completed."
 
         publish_ok = True
@@ -178,6 +188,105 @@ class ReviewOrchestrator:
                 outcomes.append(e)
         return outcomes
 
+    def _finalize_findings(
+        self,
+        ctx: MRContext,
+        min_score: float,
+        all_issues: list,
+        all_summaries: list,
+    ) -> tuple[float, list, list]:
+        summaries = list(all_summaries)
+        filter_opts = self._diff_filter_options(ctx)
+        pre_filter_count = len(all_issues)
+        total_filtered_dropped = 0
+
+        if AICR_FILTER_ISSUES_TO_DIFF and all_issues:
+            all_issues, summaries, dropped_n = self._apply_diff_filter(
+                all_issues, ctx.changed_files, summaries, filter_opts
+            )
+            total_filtered_dropped += dropped_n
+            min_score = reconcile_score(
+                min_score, all_issues, filtered_dropped=total_filtered_dropped
+            )
+
+        language_hint = infer_language_hint(
+            ctx.changed_files or [{"new_path": p} for p in ctx.deleted_files]
+        )
+        if should_reflect(
+            min_score,
+            all_issues,
+            filtered_dropped=total_filtered_dropped,
+            pre_filter_count=pre_filter_count,
+        ):
+            diff_text = redact_secrets(self._diff_text_for_reflection(ctx))
+            initial = {
+                "score": min_score,
+                "summary": " | ".join(summaries) if summaries else "",
+                "issues": all_issues,
+            }
+            reflected = run_reflection(
+                self.llm,
+                self.renderer,
+                self.parser,
+                language_hint=language_hint,
+                context_md=ctx.context_md,
+                mr_title=ctx.title,
+                mr_description=ctx.description,
+                diff_text=diff_text,
+                initial=initial,
+            )
+            min_score = float(reflected.get("score", min_score))
+            all_issues = reflected.get("issues", all_issues)
+            if reflected.get("summary"):
+                summaries.append(f"{reflected['summary']} (reflection)")
+
+            if AICR_FILTER_ISSUES_TO_DIFF and all_issues:
+                all_issues, summaries, dropped_n = self._apply_diff_filter(
+                    all_issues, ctx.changed_files, summaries, filter_opts,
+                    log_prefix="After reflection: ",
+                )
+                total_filtered_dropped += dropped_n
+                min_score = reconcile_score(
+                    min_score, all_issues, filtered_dropped=total_filtered_dropped
+                )
+
+        return min_score, all_issues, summaries
+
+    @staticmethod
+    def _diff_filter_options(ctx: MRContext) -> dict:
+        """deletions-only 场景允许引用已删除路径的 issue。"""
+        return {"additional_allowed_paths": list(ctx.deleted_files or [])}
+
+    def _apply_diff_filter(
+        self,
+        issues: list,
+        changed_files: list,
+        summaries: list,
+        filter_opts: dict,
+        *,
+        log_prefix: str = "",
+    ) -> tuple[list, list, int]:
+        kept, dropped = filter_issues_to_diff(
+            issues,
+            changed_files,
+            additional_allowed_paths=filter_opts.get("additional_allowed_paths"),
+        )
+        if dropped:
+            logger.info(
+                f"{log_prefix}Filtered {len(dropped)} issue(s) outside MR diff hunks"
+            )
+            summaries = list(summaries)
+            summaries.append(
+                f"{log_prefix}Dropped {len(dropped)} issue(s) not in diff hunks"
+            )
+        return kept, summaries, len(dropped)
+
+    def _diff_text_for_reflection(self, ctx: MRContext) -> str:
+        return self._build_diff_text(
+            ctx.changed_files,
+            deleted_files=ctx.deleted_files if ctx.deleted_files else None,
+        )
+
     def _build_chunks(self, ctx: MRContext) -> List[Dict]:
         chunks = self.chunker.chunk_files(ctx.changed_files)
         if chunks:
@@ -223,7 +332,10 @@ class ReviewOrchestrator:
     def _review_chunk(
         self, ctx: MRContext, chunk: Dict, chunk_index: int = 0, total_chunks: int = 1
     ) -> Dict[str, Any]:
-        language_hint = infer_language_hint(chunk["files"])
+        hint_files = list(chunk["files"])
+        if chunk.get("deletions_only") and ctx.deleted_files:
+            hint_files = [{"new_path": p} for p in ctx.deleted_files] + hint_files
+        language_hint = infer_language_hint(hint_files)
         system_prompt = self.renderer.render_system(
             context_md=ctx.context_md,
             language_hint=language_hint,
