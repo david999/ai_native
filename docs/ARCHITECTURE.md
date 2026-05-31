@@ -83,6 +83,9 @@ flowchart TB
 | `app/review/token_utils.py` | tiktoken / 字符回退计数 |
 | `app/review/language_priority.py` | 文件排序与 language_hint 推断 |
 | `app/review/review_state.py` | 上次评审 head SHA 持久化 |
+| `app/review/diff_line_index.py` | 解析 diff hunk，过滤行内评论行号 |
+| `app/review/reflection.py` | Self-reflection 二次校验 |
+| `app/review/prompts/system_*.j2` | 多语言 system 模板 |
 | `app/gitlab/publisher.py` | 评论与摘要发布 |
 | `app/llm/factory.py` | 按 `LLM_PROVIDER` 创建客户端 |
 | `app/llm/openai_compat.py` | OpenAI 兼容 Chat Completions |

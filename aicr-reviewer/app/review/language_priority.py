@@ -64,3 +64,33 @@ def infer_language_hint(files: List[Dict]) -> str:
         ".gradle": "Gradle",
     }
     return mapping.get(top_ext, f"{top_ext.lstrip('.') or 'General'}")
+
+
+_SYSTEM_TEMPLATE_BY_HINT: dict[str, str] = {
+    "Java/Spring": "system_spring.j2",
+    "Kotlin": "system_spring.j2",
+    "XML/Spring": "system_spring.j2",
+    "Java Properties": "system_spring.j2",
+    "Gradle": "system_spring.j2",
+    "Python": "system_python.j2",
+    "Go": "system_go.j2",
+    "JavaScript": "system_typescript.j2",
+    "TypeScript": "system_typescript.j2",
+    "TypeScript/React": "system_typescript.j2",
+}
+
+
+def resolve_system_template(language_hint: str) -> str:
+    """根据 language_hint 选择 system 提示词模板。"""
+    if language_hint in _SYSTEM_TEMPLATE_BY_HINT:
+        return _SYSTEM_TEMPLATE_BY_HINT[language_hint]
+    hint_lower = (language_hint or "").lower()
+    if "java" in hint_lower or "spring" in hint_lower or "kotlin" in hint_lower:
+        return "system_spring.j2"
+    if "python" in hint_lower:
+        return "system_python.j2"
+    if hint_lower == "go":
+        return "system_go.j2"
+    if any(x in hint_lower for x in ("typescript", "javascript", "react")):
+        return "system_typescript.j2"
+    return "system_general.j2"

@@ -2,7 +2,14 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, List, Union
 
-from app.config import REVIEW_DRY_RUN, REVIEW_CHUNK_MAX_WORKERS, SCORE_THRESHOLD
+from app.config import (
+    AICR_FILTER_ISSUES_TO_DIFF,
+    REVIEW_CHUNK_MAX_WORKERS,
+    REVIEW_DRY_RUN,
+    SCORE_THRESHOLD,
+)
+from app.review.diff_line_index import filter_issues_to_diff
+from app.review.reflection import run_reflection, should_reflect
 from app.exceptions import LLMReviewError, NoReviewableChangesError
 from app.gitlab.context_builder import ContextBuilder, MRContext, _is_supported_path
 from app.gitlab.publisher import GitLabPublisher
@@ -81,7 +88,9 @@ class ReviewOrchestrator:
                 f"{'; '.join(llm_failures)}"
             )
 
-        final_score = min_score
+        final_score, all_issues, all_summaries = self._finalize_findings(
+            ctx, min_score, all_issues, all_summaries
+        )
         summary = " | ".join(all_summaries) if all_summaries else "Review completed."
 
         publish_ok = True
@@ -177,6 +186,50 @@ class ReviewOrchestrator:
             except LLMReviewError as e:
                 outcomes.append(e)
         return outcomes
+
+    def _finalize_findings(
+        self,
+        ctx: MRContext,
+        min_score: float,
+        all_issues: list,
+        all_summaries: list,
+    ) -> tuple[float, list, list]:
+        summaries = list(all_summaries)
+
+        if AICR_FILTER_ISSUES_TO_DIFF and all_issues:
+            kept, dropped = filter_issues_to_diff(all_issues, ctx.changed_files)
+            if dropped:
+                logger.info(
+                    f"Filtered {len(dropped)} issue(s) outside MR diff hunks"
+                )
+                summaries.append(
+                    f"Dropped {len(dropped)} issue(s) not in diff hunks"
+                )
+            all_issues = kept
+
+        language_hint = infer_language_hint(ctx.changed_files)
+        if should_reflect(min_score, all_issues):
+            initial = {
+                "score": min_score,
+                "summary": summaries[-1] if summaries else "",
+                "issues": all_issues,
+            }
+            reflected = run_reflection(
+                self.llm,
+                self.renderer,
+                self.parser,
+                language_hint=language_hint,
+                context_md=ctx.context_md,
+                mr_title=ctx.title,
+                mr_description=ctx.description,
+                initial=initial,
+            )
+            min_score = float(reflected.get("score", min_score))
+            all_issues = reflected.get("issues", all_issues)
+            if reflected.get("summary"):
+                summaries.append(f"{reflected['summary']} (reflection)")
+
+        return min_score, all_issues, summaries
 
     def _build_chunks(self, ctx: MRContext) -> List[Dict]:
         chunks = self.chunker.chunk_files(ctx.changed_files)

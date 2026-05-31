@@ -47,6 +47,15 @@ MR Pipeline
 | head 未变跳过 | （内置） | `last_reviewed_sha == head_sha` 时不调 LLM，发摘要 note |
 | 并行 chunk | `REVIEW_CHUNK_MAX_WORKERS=2` | 多块 MR 并行调 LLM（`1` 为串行） |
 
+**阶段 B**
+
+| 能力 | 配置 | 说明 |
+|------|------|------|
+| diff 内 issue 过滤 | `AICR_FILTER_ISSUES_TO_DIFF=1`（默认） | 丢弃行号不在 MR diff hunk 内的 LLM issue |
+| Self-reflection | `AICR_SELF_REFLECTION=1` | 低分或 critical/major 时二次 LLM 校验 |
+| Reflection 分数阈值 | `AICR_REFLECTION_SCORE_THRESHOLD` | 默认与 `AICR_SCORE_THRESHOLD` 相同 |
+| 多语言 system 模板 | （内置） | 按扩展名选择 `system_spring` / `python` / `go` / `typescript` / `general` |
+
 ## API 增量 / 全量
 
 ```json

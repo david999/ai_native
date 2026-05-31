@@ -119,6 +119,113 @@ def test_chunker_splits_chunks():
     print("OK chunker splits chunks")
 
 
+def test_diff_line_index():
+    from app.review.diff_line_index import (
+        parse_diff_new_line_ranges,
+        filter_issues_to_diff,
+        line_in_diff,
+    )
+
+    diff = (
+        "@@ -10,3 +10,4 @@\n"
+        " context\n"
+        "-removed\n"
+        "+added\n"
+    )
+    ranges = parse_diff_new_line_ranges(diff)
+    assert line_in_diff(10, ranges)
+    assert line_in_diff(11, ranges)
+    assert not line_in_diff(99, ranges)
+
+    files = [{"new_path": "src/A.java", "old_path": "src/A.java", "diff": diff}]
+    issues = [
+        {"file": "src/A.java", "line": 11, "message": "ok"},
+        {"file": "src/A.java", "line": 99, "message": "bad"},
+    ]
+    kept, dropped = filter_issues_to_diff(issues, files)
+    assert len(kept) == 1 and kept[0]["line"] == 11
+    assert len(dropped) == 1
+    print("OK diff line index")
+
+
+def test_resolve_system_template():
+    from app.review.language_priority import resolve_system_template
+
+    assert resolve_system_template("Python") == "system_python.j2"
+    assert resolve_system_template("Go") == "system_go.j2"
+    assert resolve_system_template("Java/Spring") == "system_spring.j2"
+    assert resolve_system_template("TypeScript") == "system_typescript.j2"
+    assert resolve_system_template("Rust") == "system_general.j2"
+    print("OK resolve system template")
+
+
+def test_prompt_renderer_multilang():
+    from app.review.prompt_renderer import PromptRenderer
+
+    r = PromptRenderer()
+    py = r.render_system(language_hint="Python")
+    assert "Python" in py
+    assert '"score"' in py
+    go = r.render_system(language_hint="Go")
+    assert "goroutine" in go.lower() or "Go" in go
+    print("OK prompt renderer multilang")
+
+
+def test_should_reflect():
+    from app.review.reflection import should_reflect
+
+    with patch("app.review.reflection.AICR_SELF_REFLECTION", True), \
+         patch("app.review.reflection.AICR_REFLECTION_SCORE_THRESHOLD", 60.0):
+        assert should_reflect(50.0, []) is True
+        assert should_reflect(90.0, [{"severity": "critical"}]) is True
+        assert should_reflect(90.0, [{"severity": "minor"}]) is False
+    print("OK should reflect")
+
+
+def test_orchestrator_filters_out_of_diff():
+    from app.review.orchestrator import ReviewOrchestrator
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({
+        "score": 70,
+        "summary": "findings",
+        "issues": [
+            {"file": "A.java", "line": 2, "severity": "major", "message": "in diff"},
+            {"file": "A.java", "line": 500, "severity": "major", "message": "out"},
+        ],
+    })
+
+    diff = "@@ -1,1 +1,2 @@\n x\n+added\n"
+    ctx = MagicMock(
+        changed_files=[{
+            "new_path": "A.java", "old_path": "A.java", "diff": diff,
+            "content": "", "is_supported": True,
+        }],
+        deleted_files=[],
+        skip_review=False,
+        context_md="",
+        title="t",
+        description="",
+        project_id=1,
+        mr_iid=3,
+        diff_refs=None,
+        head_sha="",
+        incremental_from_sha=None,
+    )
+
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", True), \
+         patch("app.review.reflection.AICR_SELF_REFLECTION", False), \
+         patch("app.review.orchestrator.AICR_FILTER_ISSUES_TO_DIFF", True):
+        result = orch.run(1, 3)
+
+    assert len(result["issues"]) == 1
+    assert result["issues"][0]["line"] == 2
+    print("OK orchestrator filters out of diff")
+
+
 def test_diff_compress_deletion_only_hunk():
     from app.review.diff_compress import compress_unified_diff
 
@@ -508,33 +615,39 @@ def test_orchestrator_success():
         "summary": "looks good",
         "issues": [{
             "file": "Svc.java",
-            "line": 10,
-            "severity": "warning",
+            "line": 8,
+            "severity": "minor",
             "category": "style",
             "message": "rename",
             "suggestion": "use verb",
         }],
     })
 
-    ctx = MagicMock()
-    ctx.changed_files = [{
-        "new_path": "Svc.java",
-        "old_path": "Svc.java",
-        "diff": "+code",
-        "content": "",
-        "is_supported": True,
-    }]
-    ctx.context_md = ""
-    ctx.title = "feat"
-    ctx.description = ""
-    ctx.project_id = 1
-    ctx.mr_iid = 2
-    ctx.diff_refs = None
+    ctx = MagicMock(
+        changed_files=[{
+            "new_path": "Svc.java",
+            "old_path": "Svc.java",
+            "diff": "@@ -8,1 +8,2 @@\n+code\n",
+            "content": "",
+            "is_supported": True,
+        }],
+        deleted_files=[],
+        skip_review=False,
+        context_md="",
+        title="feat",
+        description="",
+        project_id=1,
+        mr_iid=2,
+        diff_refs=None,
+        head_sha="",
+        incremental_from_sha=None,
+    )
 
     orch = ReviewOrchestrator(MagicMock(), llm, MagicMock())
     orch.context_builder.build = MagicMock(return_value=ctx)
 
-    with patch("app.review.orchestrator.REVIEW_DRY_RUN", True):
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", True), \
+         patch("app.review.reflection.AICR_SELF_REFLECTION", False):
         result = orch.run(1, 2)
 
     assert result["review_completed"] is True
@@ -809,6 +922,11 @@ if __name__ == "__main__":
         test_parser_score_clamp,
         test_parser_embedded_json,
         test_parser_skips_non_dict_issues,
+        test_diff_line_index,
+        test_resolve_system_template,
+        test_prompt_renderer_multilang,
+        test_should_reflect,
+        test_orchestrator_filters_out_of_diff,
         test_diff_compress_deletion_only_hunk,
         test_diff_compress_deletion_only_lines,
         test_diff_compress_entire_file_delete,

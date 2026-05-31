@@ -1,0 +1,27 @@
+## Output Format
+
+You MUST respond with a JSON object matching this schema:
+```json
+{
+  "score": <integer 0-100>,
+  "summary": "<1-2 sentence overall assessment>",
+  "issues": [
+    {
+      "file": "<file path relative to repo root>",
+      "line": <line number in the new file>,
+      "severity": "<critical|major|minor|info>",
+      "category": "<null_safety|security|transaction|performance|spring_cloud|api_design|config|other>",
+      "message": "<concise description of the problem>",
+      "suggestion": "<optional: how to fix it>"
+    }
+  ]
+}
+```
+
+Rules:
+- Only report real issues, not style preferences
+- Each issue must have a specific file and line number that appears in the provided diff
+- severity "critical" = security vulnerability or data loss risk
+- severity "major" = bug or significant design flaw
+- severity "minor" = improvement opportunity
+- severity "info" = informational note
