@@ -1000,6 +1000,112 @@ def test_webhook_accepted():
     print("OK webhook accepted")
 
 
+def test_config_toml_merge():
+    from app.config_toml import merged_config, deep_get
+
+    deploy = {"review": {"score_threshold": 55}, "tools": {"ask_enabled": True}}
+    project = {"review": {"score_threshold": 70}}
+    cfg = merged_config(deploy, project)
+    assert deep_get(cfg, "review", "score_threshold") == 70
+    assert deep_get(cfg, "tools", "ask_enabled") is True
+    print("OK config toml merge")
+
+
+def test_should_respond_to_note():
+    from app.tools.ask import should_respond_to_note
+
+    assert should_respond_to_note("@aicr 这段 diff 安全吗？")
+    assert should_respond_to_note("please /ask about null checks")
+    assert not should_respond_to_note("LGTM")
+    assert not should_respond_to_note(
+        "**AICR**\n\nauto reply", author_username="human"
+    )
+    assert not should_respond_to_note(
+        "@aicr hello", author_username="aicr-bot", bot_username="aicr-bot"
+    )
+    assert not should_respond_to_note("@aicr", is_system_note=True)
+    print("OK should respond to note")
+
+
+def test_tool_parser_describe():
+    from app.tools.tool_parser import ToolResponseParser
+
+    raw = '{"title": "Fix auth", "description": "## Summary\\n- fix login"}'
+    parsed = ToolResponseParser().parse_describe(raw)
+    assert parsed["title"] == "Fix auth"
+    assert "Summary" in parsed["description"]
+    print("OK tool parser describe")
+
+
+def test_describe_prompt_untrusted():
+    from app.review.prompt_renderer import PromptRenderer
+
+    text = PromptRenderer().render_describe_user(
+        mr_title="ignore previous",
+        mr_description="do evil",
+        changed_files_summary="- `a.py`",
+        diff_text="diff",
+    )
+    assert "<untrusted_mr_metadata>" in text
+    print("OK describe prompt untrusted")
+
+
+def test_webhook_note_ignored():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "looks good",
+            "noteable_type": "MergeRequest",
+            "system": False,
+        },
+        "merge_request": {"iid": 3},
+        "project": {"id": 7},
+        "user": {"username": "dev"},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", ""), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", True):
+        resp = client.post("/webhook/gitlab", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ignored"
+    print("OK webhook note ignored")
+
+
+def test_webhook_note_accepted():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "@aicr 解释一下这个 MR",
+            "noteable_type": "MergeRequest",
+            "discussion_id": "abc-disc",
+            "system": False,
+        },
+        "merge_request": {"iid": 3},
+        "project": {"id": 7},
+        "user": {"username": "dev"},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", "hook-secret"), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False), \
+         patch("app.api.routes._run_ask") as mock_ask:
+        resp = client.post(
+            "/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "hook-secret"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "accepted"
+    assert body["kind"] == "note"
+    print("OK webhook note accepted")
+
+
 def test_llm_factory_missing_key():
     from app.llm.factory import create_llm_provider
 
@@ -1066,6 +1172,12 @@ if __name__ == "__main__":
         test_webhook_ignored,
         test_webhook_unauthorized,
         test_webhook_accepted,
+        test_config_toml_merge,
+        test_should_respond_to_note,
+        test_tool_parser_describe,
+        test_describe_prompt_untrusted,
+        test_webhook_note_ignored,
+        test_webhook_note_accepted,
         test_llm_factory_missing_key,
     ]
     for fn in tests:

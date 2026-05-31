@@ -62,7 +62,7 @@ CI 组合 **reviewdog + AICR** 见 [CI_REVIEW_PIPELINE.md](./CI_REVIEW_PIPELINE.
 
 ## 安全实践
 
-1. **不要**将 `evn/.env`、Runner `config.toml`、GitLab `gitlab-secrets.json` 提交到 Git（已在根 `.gitignore` 排除）。
+1. **不要**将 `evn/.env`、`evn/.aicr/config.toml`、Runner `config.toml`、GitLab `gitlab-secrets.json` 提交到 Git（已在根 `.gitignore` 排除）。
 2. 评审前会对 diff、上下文、**MR 标题/描述**及 CI 注入的 `extra_diff` 做 **脱敏**（`app/utils/redact.py`），但仍应避免在 MR 中粘贴真实密钥。
 3. 生产环境务必设置 `REVIEW_API_SECRET` 与 `GITLAB_WEBHOOK_SECRET`。
 4. `ROOT_PAT` 仅用于 GitLab 初始化/管理，与 Bot Token 职责分离。
