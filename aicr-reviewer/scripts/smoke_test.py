@@ -1192,6 +1192,117 @@ def test_diff_text_truncation():
     print("OK diff text truncation")
 
 
+def test_llm_settings_for_tool():
+    from app.config_resolver import llm_settings_for_tool
+
+    with patch.dict("os.environ", {}, clear=False):
+        settings = llm_settings_for_tool(
+            "describe",
+            {"llm": {"describe": {"model": "mini", "temperature": 0.1}}},
+        )
+    assert settings["model"] == "mini"
+    assert settings["temperature"] == 0.1
+    print("OK llm settings for tool")
+
+
+def test_create_llm_for_tool():
+    from app.llm.factory import create_llm_for_tool
+
+    with patch("app.llm.factory.LLM_API_KEY", "sk-test"), \
+         patch("app.llm.factory.LLM_MODEL", "base-model"), \
+         patch("app.config_resolver.llm_settings_for_tool",
+               return_value={"model": "tool-model", "temperature": 0.5}):
+        provider = create_llm_for_tool("changelog", {})
+    assert provider.model == "tool-model"
+    assert provider.temperature == 0.5
+    print("OK create llm for tool")
+
+
+def test_tool_parser_changelog_ask():
+    from app.tools.tool_parser import ToolResponseParser
+
+    p = ToolResponseParser()
+    cl = p.parse_changelog('{"summary": "s", "changelog": "### Added\\nx"}')
+    assert cl["summary"] == "s"
+    ask = p.parse_ask('{"answer": "ok"}')
+    assert ask["answer"] == "ok"
+    print("OK tool parser changelog ask")
+
+
+def test_extract_user_question():
+    from app.tools.ask import extract_user_question
+
+    q = extract_user_question("@aicr 风险在哪？", triggers=["@aicr"])
+    assert "风险" in q
+    assert "@aicr" not in q
+    print("OK extract user question")
+
+
+def test_webhook_review_suppressed():
+    from app.review.review_state import ReviewStateStore
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = ReviewStateStore(base_dir=Path(tmp))
+        assert not store.is_webhook_review_suppressed(1, 2)
+        store.set_suppress_webhook_review(1, 2, seconds=300)
+        assert store.is_webhook_review_suppressed(1, 2)
+        store.set_last_reviewed_sha(1, 2, "abc123")
+        assert store.is_webhook_review_suppressed(1, 2)
+    print("OK webhook review suppressed")
+
+
+def test_changelog_upsert_note():
+    from app.gitlab.mr_actions import GitLabMRActions, CHANGELOG_NOTE_MARKER
+
+    existing = MagicMock()
+    existing.body = f"{CHANGELOG_NOTE_MARKER}\n\nold"
+    mr = MagicMock()
+    mr.notes.list.return_value = [existing]
+
+    session = MagicMock()
+    session.mr = mr
+    actions = GitLabMRActions()
+    body = f"{CHANGELOG_NOTE_MARKER}\n\n**Summary:** s\n\n### Added\nx\n"
+    with patch("app.gitlab.mr_actions.gitlab_call", side_effect=lambda fn: fn()):
+        action = actions.upsert_changelog_note(1, 1, body, session=session)
+    assert action == "updated"
+    existing.save.assert_called_once()
+    print("OK changelog upsert note")
+
+
+def test_describe_tool_mock():
+    from app.tools.describe import DescribeTool
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({
+        "title": "T",
+        "description": "Body",
+    })
+    ctx = MagicMock()
+    ctx.changed_files = [{"new_path": "a.py", "is_supported": True}]
+    ctx.deleted_files = []
+    ctx.project_config = {}
+    ctx.context_md = ""
+    ctx.title = "t"
+    ctx.description = ""
+
+    builder = MagicMock()
+    builder.build.return_value = ctx
+    store = MagicMock()
+    actions = MagicMock()
+    actions.update_mr_description.return_value = True
+
+    with patch("app.tools.describe.REVIEW_DRY_RUN", False), \
+         patch("app.tools.describe.suppress_review_after_describe", return_value=True):
+        result = DescribeTool(builder, llm=llm, actions=actions, state_store=store).run(
+            1, 2, update_mr=True
+        )
+    assert result["updated_mr"] is True
+    store.set_suppress_webhook_review.assert_called_once()
+    print("OK describe tool mock")
+
+
 def test_llm_factory_missing_key():
     from app.llm.factory import create_llm_provider
 
@@ -1268,6 +1379,13 @@ if __name__ == "__main__":
         test_webhook_note_update_ignored,
         test_describe_disabled_503,
         test_diff_text_truncation,
+        test_llm_settings_for_tool,
+        test_create_llm_for_tool,
+        test_tool_parser_changelog_ask,
+        test_extract_user_question,
+        test_webhook_review_suppressed,
+        test_changelog_upsert_note,
+        test_describe_tool_mock,
         test_llm_factory_missing_key,
     ]
     for fn in tests:

@@ -12,6 +12,9 @@ describe_enabled = true
 describe_update_mr = false
 changelog_enabled = true
 ask_enabled = true
+# describe 写回 MR 后，在此秒数内跳过 MR update webhook 触发的全量评审
+suppress_review_after_describe = true
+describe_webhook_suppress_seconds = 120
 
 [ask]
 # 在 MR 评论中触发对话（Note webhook）

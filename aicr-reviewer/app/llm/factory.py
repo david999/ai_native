@@ -24,7 +24,12 @@ _PROVIDER_MAP = {
 }
 
 
-def create_llm_provider(provider: str = LLM_PROVIDER) -> LLMProvider:
+def create_llm_provider(
+    provider: str = LLM_PROVIDER,
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+) -> LLMProvider:
     preset = _PROVIDER_MAP.get(provider, {})
     api_base = LLM_API_BASE or preset.get("api_base", "")
     if not api_base:
@@ -33,12 +38,37 @@ def create_llm_provider(provider: str = LLM_PROVIDER) -> LLMProvider:
     if not LLM_API_KEY:
         raise ValueError(f"LLM_API_KEY not set (required for provider '{provider}')")
 
-    if not LLM_MODEL:
+    resolved_model = (model or "").strip() or LLM_MODEL
+    if not resolved_model:
         raise ValueError(f"LLM_MODEL not set (required for provider '{provider}')")
 
-    logger.info(f"Creating LLM provider: {provider}, base={api_base}, model={LLM_MODEL}")
+    from app.config import LLM_TEMPERATURE
+
+    resolved_temp = LLM_TEMPERATURE if temperature is None else temperature
+
+    logger.info(
+        f"Creating LLM provider: {provider}, base={api_base}, "
+        f"model={resolved_model}, temperature={resolved_temp}"
+    )
     return OpenAICompatibleProvider(
         api_base=api_base,
         api_key=LLM_API_KEY,
-        model=LLM_MODEL,
+        model=resolved_model,
+        temperature=resolved_temp,
+    )
+
+
+def create_llm_for_tool(
+    tool: str,
+    project_config: dict | None = None,
+    provider: str = LLM_PROVIDER,
+) -> LLMProvider:
+    """阶段 C：按 config.toml ``[llm.<tool>]`` 或 ``LLM_MODEL_<TOOL>`` 创建客户端。"""
+    from app.config_resolver import llm_settings_for_tool
+
+    settings = llm_settings_for_tool(tool, project_config)
+    return create_llm_provider(
+        provider,
+        model=settings.get("model"),
+        temperature=settings.get("temperature"),
     )

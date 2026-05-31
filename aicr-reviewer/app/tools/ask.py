@@ -12,6 +12,7 @@ from app.gitlab.context_builder import ContextBuilder
 from app.gitlab.mr_actions import GitLabMRActions
 from app.gitlab.session import GitLabMRSession
 from app.llm.base import LLMProvider
+from app.llm.factory import create_llm_for_tool
 from app.review.language_priority import infer_language_hint
 from app.review.prompt_renderer import PromptRenderer
 from app.tools.diff_text import build_diff_text_from_context, changed_files_summary
@@ -84,11 +85,11 @@ class AskTool:
     def __init__(
         self,
         context_builder: ContextBuilder,
-        llm: LLMProvider,
+        llm: LLMProvider | None = None,
         actions: Optional[GitLabMRActions] = None,
     ):
         self.context_builder = context_builder
-        self.llm = llm
+        self._llm = llm
         self.actions = actions or GitLabMRActions()
         self.renderer = PromptRenderer()
         self.parser = ToolResponseParser()
@@ -109,6 +110,8 @@ class AskTool:
         supported = [f for f in ctx.changed_files if f.get("is_supported")]
         if not supported and not ctx.deleted_files:
             raise NoReviewableChangesError("No supported changes for ask")
+
+        llm = self._llm or create_llm_for_tool("ask", ctx.project_config)
 
         language_hint = infer_language_hint(
             ctx.changed_files or [{"new_path": p} for p in ctx.deleted_files]
@@ -131,7 +134,7 @@ class AskTool:
         ]
 
         try:
-            raw = self.llm.chat(messages, json_mode=True)
+            raw = llm.chat(messages, json_mode=True)
             parsed = self.parser.parse_ask(raw)
         except Exception as e:
             raise LLMReviewError(f"Ask failed: {e}") from e

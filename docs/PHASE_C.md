@@ -62,3 +62,19 @@ curl -s -X POST http://localhost:8001/changelog \
 
 `/describe` 与 `/changelog` 独立于 `POST /review`，不修改 `last_reviewed_sha`。  
 工具内部使用 `force_full=True` 拉取完整 MR diff，避免「head 未变跳过」影响文案生成。
+
+**describe 写回 MR**：默认在 `AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS`（默认 120s）内跳过由 MR `update` webhook 触发的全量评审，避免 describe 更新描述后立即再跑一轮 review。可通过 `AICR_SUPPRESS_REVIEW_AFTER_DESCRIBE=0` 关闭。
+
+## LLM 按工具配置
+
+优先级：`LLM_MODEL_DESCRIBE` 等环境变量 > 仓库/部署 `config.toml` 的 `[llm.describe]` > 全局 `LLM_MODEL`。
+
+```toml
+[llm.describe]
+model = "gpt-4o-mini"
+temperature = 0.3
+```
+
+## CHANGELOG note 去重
+
+`/changelog` 若 MR 上已有以 `## AICR Changelog` 开头的 note，则**更新**该 note；内容相同则跳过（`note_action=unchanged`）。

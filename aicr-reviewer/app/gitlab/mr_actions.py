@@ -9,6 +9,8 @@ from app.gitlab.session import GitLabMRSession, gitlab_call
 
 logger = logging.getLogger("aicr")
 
+CHANGELOG_NOTE_MARKER = "## AICR Changelog"
+
 
 class GitLabMRActions:
     def update_mr_description(
@@ -49,6 +51,44 @@ class GitLabMRActions:
         except Exception as e:
             logger.error(f"Failed to post note on MR !{mr_iid}: {e}")
             return False
+
+    def upsert_changelog_note(
+        self,
+        project_id: int,
+        mr_iid: int,
+        body: str,
+        *,
+        session: Optional[GitLabMRSession] = None,
+        marker: str = CHANGELOG_NOTE_MARKER,
+    ) -> str:
+        """更新已有 Changelog note，或新建；内容未变时返回 ``unchanged``。"""
+        gl_session = session or GitLabMRSession(project_id, mr_iid)
+        mr = gl_session.mr
+
+        def _find_existing():
+            for note in mr.notes.list(get_all=True):
+                if (getattr(note, "body", None) or "").strip().startswith(marker):
+                    return note
+            return None
+
+        try:
+            existing = gitlab_call(_find_existing)
+            if existing is not None:
+                current = (getattr(existing, "body", None) or "").strip()
+                if current == body.strip():
+                    logger.info(f"Changelog note unchanged on MR !{mr_iid}")
+                    return "unchanged"
+                existing.body = body
+                gitlab_call(lambda: existing.save())
+                logger.info(f"Updated changelog note on MR !{mr_iid}")
+                return "updated"
+
+            gitlab_call(lambda: mr.notes.create({"body": body}))
+            logger.info(f"Created changelog note on MR !{mr_iid}")
+            return "created"
+        except Exception as e:
+            logger.error(f"Changelog note upsert failed on MR !{mr_iid}: {e}")
+            return "failed"
 
     def reply_to_note(
         self,

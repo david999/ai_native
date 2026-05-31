@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -39,18 +39,12 @@ class ReviewStateStore:
     def set_last_reviewed_sha(self, project_id: int, mr_iid: int, sha: str) -> None:
         if not AICR_INCREMENTAL_REVIEW or not sha:
             return
-        path = self._path(project_id, mr_iid)
-        payload = {
-            "last_reviewed_sha": sha,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        tmp = path.with_suffix(".json.tmp")
+        payload = self._read_payload(project_id, mr_iid)
+        payload["last_reviewed_sha"] = sha
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
         try:
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            os.replace(tmp, path)
+            self._write_payload(project_id, mr_iid, payload)
         except OSError:
-            if tmp.is_file():
-                tmp.unlink(missing_ok=True)
             raise
         logger.info(f"Saved review state for project={project_id} MR !{mr_iid} sha={sha[:8]}")
 
@@ -58,3 +52,50 @@ class ReviewStateStore:
         path = self._path(project_id, mr_iid)
         if path.is_file():
             path.unlink(missing_ok=True)
+
+    def _read_payload(self, project_id: int, mr_iid: int) -> dict:
+        path = self._path(project_id, mr_iid)
+        if not path.is_file():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _write_payload(self, project_id: int, mr_iid: int, payload: dict) -> None:
+        path = self._path(project_id, mr_iid)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def set_suppress_webhook_review(
+        self,
+        project_id: int,
+        mr_iid: int,
+        *,
+        seconds: int = 120,
+    ) -> None:
+        """describe 写回 MR 后短暂跳过 MR update webhook 触发的全量评审。"""
+        payload = self._read_payload(project_id, mr_iid)
+        until = datetime.now(timezone.utc) + timedelta(seconds=max(1, seconds))
+        payload["suppress_webhook_review_until"] = until.isoformat()
+        self._write_payload(project_id, mr_iid, payload)
+        logger.info(
+            f"Suppress webhook review for project={project_id} MR !{mr_iid} "
+            f"until {until.isoformat()}"
+        )
+
+    def is_webhook_review_suppressed(self, project_id: int, mr_iid: int) -> bool:
+        payload = self._read_payload(project_id, mr_iid)
+        raw = payload.get("suppress_webhook_review_until")
+        if not raw:
+            return False
+        try:
+            until = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        if datetime.now(timezone.utc) >= until:
+            return False
+        return True

@@ -60,6 +60,7 @@ class DescribeResult(BaseModel):
     description: str = ""
     updated_mr: bool = False
     dry_run: bool = False
+    webhook_review_suppressed: bool = False
 
 
 class ChangelogRequest(BaseModel):
@@ -71,6 +72,9 @@ class ChangelogResult(BaseModel):
     summary: str = ""
     changelog: str = ""
     posted_note: bool = False
+    updated_note: bool = False
+    unchanged_note: bool = False
+    note_action: str = "skipped"
     dry_run: bool = False
 
 
@@ -189,14 +193,14 @@ def _create_llm_or_raise() -> object:
 
 
 def _run_describe(project_id: int, mr_iid: int, update_mr: bool | None) -> dict:
-    llm = _create_llm_or_raise()
-    tool = DescribeTool(_make_context_builder(), llm)
+    _create_llm_or_raise()
+    tool = DescribeTool(_make_context_builder())
     return tool.run(project_id, mr_iid, update_mr=update_mr)
 
 
 def _run_changelog(project_id: int, mr_iid: int) -> dict:
-    llm = _create_llm_or_raise()
-    tool = ChangelogTool(_make_context_builder(), llm)
+    _create_llm_or_raise()
+    tool = ChangelogTool(_make_context_builder())
     return tool.run(project_id, mr_iid)
 
 
@@ -208,7 +212,7 @@ def _run_ask(
     thread_context: str = "",
     discussion_id: str | None = None,
 ) -> dict:
-    llm = _create_llm_or_raise()
+    _create_llm_or_raise()
     builder = _make_context_builder()
     if discussion_id and not thread_context:
         from app.gitlab.mr_actions import GitLabMRActions
@@ -216,7 +220,7 @@ def _run_ask(
         thread_context = GitLabMRActions().fetch_discussion_context(
             project_id, mr_iid, discussion_id
         )
-    tool = AskTool(builder, llm)
+    tool = AskTool(builder)
     return tool.run(
         project_id,
         mr_iid,
@@ -363,6 +367,12 @@ def _schedule_mr_review(
     mr_iid: int,
 ) -> None:
     def _run_review():
+        state = ReviewStateStore()
+        if state.is_webhook_review_suppressed(project_id, mr_iid):
+            logger.info(
+                f"Webhook review skipped: MR !{mr_iid} suppressed after describe"
+            )
+            return
         try:
             acquire_review_slot()
         except ReviewCapacityError as e:

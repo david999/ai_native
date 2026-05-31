@@ -10,7 +10,11 @@ from app.exceptions import LLMReviewError, NoReviewableChangesError
 from app.gitlab.context_builder import ContextBuilder
 from app.gitlab.mr_actions import GitLabMRActions
 from app.gitlab.session import GitLabMRSession
+from app.config import AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS
+from app.config_resolver import suppress_review_after_describe
 from app.llm.base import LLMProvider
+from app.llm.factory import create_llm_for_tool
+from app.review.review_state import ReviewStateStore
 from app.review.language_priority import infer_language_hint
 from app.review.prompt_renderer import PromptRenderer
 from app.tools.diff_text import build_diff_text_from_context, changed_files_summary
@@ -23,12 +27,14 @@ class DescribeTool:
     def __init__(
         self,
         context_builder: ContextBuilder,
-        llm: LLMProvider,
+        llm: LLMProvider | None = None,
         actions: Optional[GitLabMRActions] = None,
+        state_store: Optional[ReviewStateStore] = None,
     ):
         self.context_builder = context_builder
-        self.llm = llm
+        self._llm = llm
         self.actions = actions or GitLabMRActions()
+        self.state_store = state_store or ReviewStateStore()
         self.renderer = PromptRenderer()
         self.parser = ToolResponseParser()
 
@@ -46,6 +52,8 @@ class DescribeTool:
         supported = [f for f in ctx.changed_files if f.get("is_supported")]
         if not supported and not ctx.deleted_files:
             raise NoReviewableChangesError("No supported changes for describe")
+
+        llm = self._llm or create_llm_for_tool("describe", ctx.project_config)
 
         language_hint = infer_language_hint(
             ctx.changed_files or [{"new_path": p} for p in ctx.deleted_files]
@@ -66,7 +74,7 @@ class DescribeTool:
         ]
 
         try:
-            raw = self.llm.chat(messages, json_mode=True)
+            raw = llm.chat(messages, json_mode=True)
             parsed = self.parser.parse_describe(raw)
         except Exception as e:
             raise LLMReviewError(f"Describe failed: {e}") from e
@@ -84,10 +92,18 @@ class DescribeTool:
                 title=title,
                 session=gl_session,
             )
+            if updated and suppress_review_after_describe(ctx.project_config):
+                self.state_store.set_suppress_webhook_review(
+                    project_id,
+                    mr_iid,
+                    seconds=AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS,
+                )
 
         return {
             "title": parsed["title"],
             "description": parsed["description"],
             "updated_mr": updated,
             "dry_run": REVIEW_DRY_RUN,
+            "webhook_review_suppressed": updated
+            and suppress_review_after_describe(ctx.project_config),
         }

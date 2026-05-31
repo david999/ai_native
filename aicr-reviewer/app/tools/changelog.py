@@ -10,7 +10,9 @@ from app.exceptions import LLMReviewError, NoReviewableChangesError
 from app.gitlab.context_builder import ContextBuilder
 from app.gitlab.mr_actions import GitLabMRActions
 from app.gitlab.session import GitLabMRSession
+from app.gitlab.mr_actions import CHANGELOG_NOTE_MARKER
 from app.llm.base import LLMProvider
+from app.llm.factory import create_llm_for_tool
 from app.review.prompt_renderer import PromptRenderer
 from app.tools.diff_text import build_diff_text_from_context, changed_files_summary
 from app.tools.tool_parser import ToolResponseParser
@@ -22,11 +24,11 @@ class ChangelogTool:
     def __init__(
         self,
         context_builder: ContextBuilder,
-        llm: LLMProvider,
+        llm: LLMProvider | None = None,
         actions: Optional[GitLabMRActions] = None,
     ):
         self.context_builder = context_builder
-        self.llm = llm
+        self._llm = llm
         self.actions = actions or GitLabMRActions()
         self.renderer = PromptRenderer()
         self.parser = ToolResponseParser()
@@ -44,6 +46,8 @@ class ChangelogTool:
         if not supported and not ctx.deleted_files:
             raise NoReviewableChangesError("No supported changes for changelog")
 
+        llm = self._llm or create_llm_for_tool("changelog", ctx.project_config)
+
         diff_text = build_diff_text_from_context(ctx)
         system_prompt = self.renderer.render_changelog_system(context_md=ctx.context_md)
         user_prompt = self.renderer.render_changelog_user(
@@ -58,25 +62,28 @@ class ChangelogTool:
         ]
 
         try:
-            raw = self.llm.chat(messages, json_mode=True)
+            raw = llm.chat(messages, json_mode=True)
             parsed = self.parser.parse_changelog(raw)
         except Exception as e:
             raise LLMReviewError(f"Changelog failed: {e}") from e
 
         note_body = (
-            "## AICR Changelog\n\n"
+            f"{CHANGELOG_NOTE_MARKER}\n\n"
             f"**Summary:** {parsed['summary']}\n\n"
             f"{parsed['changelog']}\n"
         )
-        posted = False
+        note_action = "skipped"
         if not REVIEW_DRY_RUN:
-            posted = self.actions.post_note(
+            note_action = self.actions.upsert_changelog_note(
                 project_id, mr_iid, note_body, session=gl_session
             )
 
         return {
             "summary": parsed["summary"],
             "changelog": parsed["changelog"],
-            "posted_note": posted,
+            "posted_note": note_action == "created",
+            "updated_note": note_action == "updated",
+            "unchanged_note": note_action == "unchanged",
+            "note_action": note_action,
             "dry_run": REVIEW_DRY_RUN,
         }

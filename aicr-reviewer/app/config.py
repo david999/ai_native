@@ -136,6 +136,17 @@ AICR_WEBHOOK_NOTE_ENABLED = toml_or_env_bool(
     deep_get(_DEPLOY_CONFIG, "tools", "webhook_note_enabled"),
     True,
 )
+AICR_SUPPRESS_REVIEW_AFTER_DESCRIBE = toml_or_env_bool(
+    "AICR_SUPPRESS_REVIEW_AFTER_DESCRIBE",
+    deep_get(_DEPLOY_CONFIG, "tools", "suppress_review_after_describe"),
+    True,
+)
+AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS = int(
+    os.getenv(
+        "AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS",
+        str(deep_get(_DEPLOY_CONFIG, "tools", "describe_webhook_suppress_seconds") or 120),
+    )
+)
 
 GITLAB_WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "")
 GITLAB_WEBHOOK_ALLOW_INSECURE = os.getenv("GITLAB_WEBHOOK_ALLOW_INSECURE", "0") == "1"
