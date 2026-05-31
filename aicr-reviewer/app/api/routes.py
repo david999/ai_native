@@ -1,11 +1,21 @@
 import logging
+import secrets
 from fastapi import APIRouter, BackgroundTasks, Request, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict
 
 from app.config import (
-    AICR_BOT_TOKEN, GITLAB_WEBHOOK_SECRET, GITLAB_WEBHOOK_ALLOW_INSECURE,
-    LLM_API_KEY, REVIEW_API_SECRET,
+    AICR_BOT_TOKEN,
+    GITLAB_WEBHOOK_SECRET,
+    GITLAB_WEBHOOK_ALLOW_INSECURE,
+    LLM_API_KEY,
+    REVIEW_API_SECRET,
+    REVIEW_API_ALLOW_INSECURE,
+)
+from app.api.concurrency import (
+    acquire_review_slot,
+    release_review_slot,
+    ReviewCapacityError,
 )
 from app.exceptions import LLMReviewError, NoReviewableChangesError, ReviewError
 from app.review.orchestrator import ReviewOrchestrator
@@ -45,16 +55,30 @@ def _fail_open_review(reason: str) -> ReviewResult:
     )
 
 
-def _verify_review_auth(request: Request) -> None:
-    """校验 CI 密钥；未配置 REVIEW_API_SECRET 时跳过（便于本地开发）。"""
-    if not REVIEW_API_SECRET:
-        return
+def _extract_review_token(request: Request) -> str:
     token = request.headers.get("X-AICR-Secret", "")
     if not token:
         auth = request.headers.get("Authorization", "")
         if auth.lower().startswith("bearer "):
             token = auth[7:].strip()
-    if token != REVIEW_API_SECRET:
+    return token
+
+
+def _verify_review_auth(request: Request) -> None:
+    """校验 CI 密钥；未配置 REVIEW_API_SECRET 时需显式 REVIEW_API_ALLOW_INSECURE=1。"""
+    if not REVIEW_API_SECRET:
+        if not REVIEW_API_ALLOW_INSECURE:
+            raise HTTPException(
+                status_code=503,
+                detail="REVIEW_API_SECRET not configured",
+            )
+        logger.warning(
+            "Review API running without secret (REVIEW_API_ALLOW_INSECURE=1)"
+        )
+        return
+
+    token = _extract_review_token(request)
+    if not token or not secrets.compare_digest(token, REVIEW_API_SECRET):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -77,7 +101,12 @@ def _run_orchestrator(project_id: int, mr_iid: int, extra_diff: str = "") -> dic
 
 @router.get("/health")
 def health():
-    from app.config import GITLAB_URL, LLM_PROVIDER, LLM_MODEL
+    return {"status": "ok"}
+
+
+@router.get("/health/detail")
+def health_detail():
+    from app.config import GITLAB_URL, LLM_PROVIDER, LLM_MODEL, REVIEW_MAX_CONCURRENT
     return {
         "status": "ok",
         "gitlab_url": GITLAB_URL,
@@ -86,41 +115,48 @@ def health():
         "llm_model": LLM_MODEL,
         "llm_key_set": bool(LLM_API_KEY),
         "review_auth_required": bool(REVIEW_API_SECRET),
+        "review_api_allow_insecure": REVIEW_API_ALLOW_INSECURE,
+        "review_max_concurrent": REVIEW_MAX_CONCURRENT,
     }
 
 
 @router.post("/review", response_model=ReviewResult)
 def review(req: ReviewRequest, request: Request):
-    try:
-        _verify_review_auth(request)
-    except HTTPException as e:
-        return _fail_open_review(str(e.detail))
+    _verify_review_auth(request)
 
     try:
-        result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
-    except NoReviewableChangesError as e:
-        logger.info(f"No reviewable changes: {e}")
+        acquire_review_slot()
+    except ReviewCapacityError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    try:
+        try:
+            result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
+        except NoReviewableChangesError as e:
+            logger.info(f"No reviewable changes: {e}")
+            return ReviewResult(
+                score=FAIL_OPEN_SCORE,
+                issues=[],
+                summary=str(e),
+                review_completed=False,
+            )
+        except HTTPException as e:
+            return _fail_open_review(str(e.detail))
+        except (LLMReviewError, ReviewError) as e:
+            return _fail_open_review(str(e))
+        except Exception as e:
+            logger.error(f"Unexpected review error: {e}", exc_info=True)
+            return _fail_open_review(str(e))
+
         return ReviewResult(
-            score=FAIL_OPEN_SCORE,
-            issues=[],
-            summary=str(e),
-            review_completed=False,
+            score=result["score"],
+            issues=result["issues"],
+            code_quality=result.get("code_quality", []),
+            summary=result.get("summary", ""),
+            review_completed=result.get("review_completed", False),
         )
-    except HTTPException as e:
-        return _fail_open_review(str(e.detail))
-    except (LLMReviewError, ReviewError) as e:
-        return _fail_open_review(str(e))
-    except Exception as e:
-        logger.error(f"Unexpected review error: {e}", exc_info=True)
-        return _fail_open_review(str(e))
-
-    return ReviewResult(
-        score=result["score"],
-        issues=result["issues"],
-        code_quality=result.get("code_quality", []),
-        summary=result.get("summary", ""),
-        review_completed=True,
-    )
+    finally:
+        release_review_slot()
 
 
 @router.post("/webhook/gitlab")
@@ -134,7 +170,7 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
         logger.warning("Webhook running without secret (GITLAB_WEBHOOK_ALLOW_INSECURE=1)")
     else:
         token = request.headers.get("X-Gitlab-Token", "")
-        if token != GITLAB_WEBHOOK_SECRET:
+        if not token or not secrets.compare_digest(token, GITLAB_WEBHOOK_SECRET):
             logger.warning("Webhook token mismatch")
             raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -154,9 +190,16 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
 
     def _run_review():
         try:
+            acquire_review_slot()
+        except ReviewCapacityError as e:
+            logger.error(f"Webhook review skipped (capacity): {e}")
+            return
+        try:
             _run_orchestrator(project_id, mr_iid)
         except Exception as e:
             logger.error(f"Webhook review failed: {e}", exc_info=True)
+        finally:
+            release_review_slot()
 
     background_tasks.add_task(_run_review)
     return {"status": "accepted", "project_id": project_id, "mr_iid": mr_iid}

@@ -21,7 +21,8 @@ GITLAB_URL=http://localhost:8000          # 本地；Docker 内为 http://gitlab
 AICR_BOT_TOKEN=glpat-...
 LLM_API_KEY=...
 LLM_MODEL=...
-REVIEW_API_SECRET=...                     # 可选；CI 用 X-AICR-Secret
+REVIEW_API_SECRET=...                     # 生产必填；CI 用 X-AICR-Secret
+REVIEW_API_ALLOW_INSECURE=0               # 仅本地：无 secret 时允许 /review
 ```
 
 ## 本地启动
@@ -53,7 +54,8 @@ docker compose -f docker-compose.yml \
 
 | 端点 | 说明 |
 |------|------|
-| `GET /health` | 健康检查 |
+| `GET /health` | 健康检查（仅 `status`） |
+| `GET /health/detail` | 详细配置探测（内网/运维用） |
 | `POST /review` | CI 触发；Header `X-AICR-Secret`（若配置了 `REVIEW_API_SECRET`） |
 | `POST /webhook/gitlab` | 需 `GITLAB_WEBHOOK_SECRET` |
 

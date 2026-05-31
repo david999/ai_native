@@ -34,6 +34,11 @@ GITLAB_URL = os.getenv("GITLAB_URL", "http://localhost:8000")
 AICR_BOT_TOKEN = os.getenv("AICR_BOT_TOKEN", "")
 SCORE_THRESHOLD = float(os.getenv("AICR_SCORE_THRESHOLD", "60"))
 REVIEW_API_SECRET = os.getenv("REVIEW_API_SECRET", "")
+REVIEW_API_ALLOW_INSECURE = os.getenv("REVIEW_API_ALLOW_INSECURE", "0") == "1"
+
+GITLAB_TIMEOUT_SECONDS = int(os.getenv("GITLAB_TIMEOUT_SECONDS", "30"))
+GITLAB_API_RETRIES = int(os.getenv("GITLAB_API_RETRIES", "3"))
+REVIEW_MAX_CONCURRENT = int(os.getenv("REVIEW_MAX_CONCURRENT", "2"))
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ctyun_openai")
 LLM_API_BASE = os.getenv("LLM_API_BASE", "https://wishub-x6.ctyun.cn/v1")
