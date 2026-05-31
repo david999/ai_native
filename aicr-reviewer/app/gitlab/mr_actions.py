@@ -72,3 +72,31 @@ class GitLabMRActions:
                 f"Discussion reply failed ({discussion_id}), falling back to note: {e}"
             )
             return self.post_note(project_id, mr_iid, body, session=gl_session)
+
+    def fetch_discussion_context(
+        self,
+        project_id: int,
+        mr_iid: int,
+        discussion_id: str,
+        *,
+        session: Optional[GitLabMRSession] = None,
+        max_notes: int = 8,
+    ) -> str:
+        if not discussion_id:
+            return ""
+        gl_session = session or GitLabMRSession(project_id, mr_iid)
+        try:
+            discussion = gitlab_call(
+                lambda: gl_session.mr.discussions.get(discussion_id)
+            )
+            raw_notes = discussion.attributes.get("notes") or []
+            lines = []
+            for note in raw_notes[-max_notes:]:
+                author = (note.get("author") or {}).get("username", "?")
+                body = (note.get("body") or "").strip()
+                if body:
+                    lines.append(f"- **{author}**: {body}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.debug(f"Could not load discussion {discussion_id}: {e}")
+            return ""

@@ -20,6 +20,23 @@ from app.tools.tool_parser import ToolResponseParser
 logger = logging.getLogger("aicr")
 
 _AICR_REPLY_PREFIX = "**AICR**"
+_AICR_BOT_NOTE_PREFIXES = ("**AICR**", "## AICR Changelog", "## AICR Review Summary")
+
+
+def _trigger_matches(token: str, lower: str) -> bool:
+    token = token.strip().lower()
+    if not token:
+        return False
+    if token.startswith("/"):
+        return bool(re.search(rf"(?:^|\s){re.escape(token)}(?:\s|$)", lower))
+    if token.startswith("@"):
+        return bool(
+            re.search(
+                rf"(?:^|\s){re.escape(token)}(?:\s|$|[.,!?;:])",
+                lower,
+            )
+        )
+    return bool(re.search(rf"(?:^|\s){re.escape(token)}(?:\s|$)", lower))
 
 
 def should_respond_to_note(
@@ -35,8 +52,9 @@ def should_respond_to_note(
     body = (note_body or "").strip()
     if not body:
         return False
-    if body.startswith(_AICR_REPLY_PREFIX):
-        return False
+    for prefix in _AICR_BOT_NOTE_PREFIXES:
+        if body.startswith(prefix):
+            return False
 
     bot = (bot_username or AICR_BOT_USERNAME).lower()
     author = (author_username or "").lower()
@@ -45,16 +63,7 @@ def should_respond_to_note(
 
     trigger_list = triggers or AICR_ASK_TRIGGERS
     lower = body.lower()
-    for t in trigger_list:
-        token = t.strip().lower()
-        if not token:
-            continue
-        if token.startswith("/"):
-            if re.search(rf"(?:^|\s){re.escape(token)}(?:\s|$)", lower):
-                return True
-        elif token in lower:
-            return True
-    return False
+    return any(_trigger_matches(t, lower) for t in trigger_list)
 
 
 def extract_user_question(note_body: str, triggers: Optional[List[str]] = None) -> str:

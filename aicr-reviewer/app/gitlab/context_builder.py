@@ -9,6 +9,7 @@ from app.config import (
     CONTEXT_MAX_CHARS,
 )
 from app.gitlab.session import GitLabMRSession, gitlab_call
+from app.config_toml import load_project_config_from_repo
 from app.review.diff_compress import compress_changes
 from app.utils.redact import redact_secrets
 
@@ -42,6 +43,7 @@ class MRContext:
         "source_branch", "target_branch", "diff_refs", "head_sha",
         "changes", "context_md", "changed_files", "deleted_files",
         "incremental_from_sha", "skip_review", "skip_reason", "gitlab_session",
+        "project_config",
     )
 
     def __init__(self):
@@ -61,6 +63,7 @@ class MRContext:
         self.skip_review: bool = False
         self.skip_reason: str = ""
         self.gitlab_session: Optional[GitLabMRSession] = None
+        self.project_config: dict = {}
 
 
 class ContextBuilder:
@@ -88,6 +91,7 @@ class ContextBuilder:
         ctx.project_id = project_id
         ctx.mr_iid = mr_iid
         ctx.gitlab_session = gl_session
+        ctx.project_config = load_project_config_from_repo(project, mr)
         ctx.title = redact_secrets(mr.title or "")
         ctx.description = redact_secrets(mr.description or "")
         ctx.source_branch = mr.source_branch

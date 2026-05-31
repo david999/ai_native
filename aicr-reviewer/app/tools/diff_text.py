@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from app.config import REVIEW_MAX_INPUT_TOKENS
 from app.gitlab.context_builder import MRContext
 
+_APPROX_CHARS_PER_TOKEN = 4
+_DEFAULT_TOOL_MAX_CHARS = REVIEW_MAX_INPUT_TOKENS * _APPROX_CHARS_PER_TOKEN
 
-def build_diff_text_from_context(ctx: MRContext, *, max_chars: int = 0) -> str:
+
+def build_diff_text_from_context(
+    ctx: MRContext, *, max_chars: int | None = None
+) -> str:
+    if max_chars is None:
+        max_chars = _DEFAULT_TOOL_MAX_CHARS
     parts = []
     if ctx.deleted_files:
         lines = "\n".join(f"- `{p}`" for p in ctx.deleted_files)
@@ -26,7 +34,7 @@ def build_diff_text_from_context(ctx: MRContext, *, max_chars: int = 0) -> str:
         parts.append(section)
 
     text = "\n\n".join(parts)
-    if max_chars > 0 and len(text) > max_chars:
+    if max_chars and len(text) > max_chars:
         text = text[:max_chars] + "\n\n... (truncated)"
     return text
 

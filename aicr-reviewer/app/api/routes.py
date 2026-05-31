@@ -33,6 +33,7 @@ from app.llm.factory import create_llm_provider
 from app.gitlab.publisher import GitLabPublisher
 from app.tools.describe import DescribeTool
 from app.tools.changelog import ChangelogTool
+from app.config_resolver import ask_triggers_for_project, bot_username_for_project
 from app.tools.ask import AskTool, should_respond_to_note, extract_user_question
 
 logger = logging.getLogger("aicr")
@@ -180,14 +181,21 @@ def _make_context_builder() -> ContextBuilder:
     return ContextBuilder(state_store=ReviewStateStore())
 
 
+def _create_llm_or_raise() -> object:
+    try:
+        return create_llm_provider()
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail="LLM provider not configured") from e
+
+
 def _run_describe(project_id: int, mr_iid: int, update_mr: bool | None) -> dict:
-    llm = create_llm_provider()
+    llm = _create_llm_or_raise()
     tool = DescribeTool(_make_context_builder(), llm)
     return tool.run(project_id, mr_iid, update_mr=update_mr)
 
 
 def _run_changelog(project_id: int, mr_iid: int) -> dict:
-    llm = create_llm_provider()
+    llm = _create_llm_or_raise()
     tool = ChangelogTool(_make_context_builder(), llm)
     return tool.run(project_id, mr_iid)
 
@@ -200,8 +208,15 @@ def _run_ask(
     thread_context: str = "",
     discussion_id: str | None = None,
 ) -> dict:
-    llm = create_llm_provider()
-    tool = AskTool(_make_context_builder(), llm)
+    llm = _create_llm_or_raise()
+    builder = _make_context_builder()
+    if discussion_id and not thread_context:
+        from app.gitlab.mr_actions import GitLabMRActions
+
+        thread_context = GitLabMRActions().fetch_discussion_context(
+            project_id, mr_iid, discussion_id
+        )
+    tool = AskTool(builder, llm)
     return tool.run(
         project_id,
         mr_iid,
@@ -379,8 +394,9 @@ def _schedule_note_ask(
     *,
     author_username: str,
     discussion_id: str | None,
+    project_config: dict | None = None,
 ) -> None:
-    def _run_ask():
+    def _note_ask_task():
         if not AICR_ASK_ENABLED or not AICR_WEBHOOK_NOTE_ENABLED:
             return
         try:
@@ -394,7 +410,12 @@ def _schedule_note_ask(
             logger.info(f"Note ask skipped: MR !{mr_iid} busy")
             return
         try:
-            question = extract_user_question(note_body)
+            triggers = ask_triggers_for_project(project_config)
+            question = extract_user_question(note_body, triggers=triggers)
+            logger.info(
+                f"Note ask from @{author_username} on MR !{mr_iid}: "
+                f"{question[:80]!r}..."
+            )
             _run_ask(
                 project_id,
                 mr_iid,
@@ -407,7 +428,7 @@ def _schedule_note_ask(
             release_mr_review(project_id, mr_iid)
             release_review_slot()
 
-    background_tasks.add_task(_run_ask)
+    background_tasks.add_task(_note_ask_task)
 
 
 @router.post("/webhook/gitlab")
@@ -421,6 +442,10 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
             return {"status": "ignored", "reason": "note webhook disabled"}
 
         attrs = body.get("object_attributes", {})
+        note_action = attrs.get("action", "create")
+        if note_action not in ("create",):
+            return {"status": "ignored", "reason": f"note action: {note_action}"}
+
         if attrs.get("noteable_type") != "MergeRequest":
             return {
                 "status": "ignored",
@@ -430,17 +455,34 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
         note_body = attrs.get("note", "") or ""
         author_username = (body.get("user") or {}).get("username", "")
         is_system = bool(attrs.get("system"))
-        if not should_respond_to_note(
-            note_body,
-            author_username=author_username,
-            is_system_note=is_system,
-        ):
-            return {"status": "ignored", "reason": "no trigger or bot note"}
 
         project_id = body.get("project", {}).get("id")
         mr_iid = (body.get("merge_request") or {}).get("iid")
         if not project_id or not mr_iid:
             return {"status": "ignored", "reason": "missing project_id or mr_iid"}
+
+        project_config: dict = {}
+        try:
+            from app.config_toml import load_project_config_from_repo
+            from app.gitlab.session import GitLabMRSession
+
+            gl_session = GitLabMRSession(project_id, mr_iid)
+            project_config = load_project_config_from_repo(
+                gl_session.project, gl_session.mr
+            )
+        except Exception as e:
+            logger.debug(f"Project config not loaded for note webhook: {e}")
+
+        bot_user = bot_username_for_project(project_config)
+        triggers = ask_triggers_for_project(project_config)
+        if not should_respond_to_note(
+            note_body,
+            author_username=author_username,
+            is_system_note=is_system,
+            triggers=triggers,
+            bot_username=bot_user,
+        ):
+            return {"status": "ignored", "reason": "no trigger or bot note"}
 
         discussion_id = attrs.get("discussion_id") or attrs.get("discussion", {}).get("id")
         _schedule_note_ask(
@@ -450,6 +492,7 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
             note_body,
             author_username=author_username,
             discussion_id=str(discussion_id) if discussion_id else None,
+            project_config=project_config,
         )
         return {
             "status": "accepted",

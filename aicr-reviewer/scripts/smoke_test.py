@@ -1016,6 +1016,8 @@ def test_should_respond_to_note():
 
     assert should_respond_to_note("@aicr 这段 diff 安全吗？")
     assert should_respond_to_note("please /ask about null checks")
+    assert not should_respond_to_note("contact user@aicr.com for access")
+    assert not should_respond_to_note("## AICR Changelog\n\n### Added")
     assert not should_respond_to_note("LGTM")
     assert not should_respond_to_note(
         "**AICR**\n\nauto reply", author_username="human"
@@ -1084,6 +1086,7 @@ def test_webhook_note_accepted():
         "object_attributes": {
             "note": "@aicr 解释一下这个 MR",
             "noteable_type": "MergeRequest",
+            "action": "create",
             "discussion_id": "abc-disc",
             "system": False,
         },
@@ -1104,6 +1107,89 @@ def test_webhook_note_accepted():
     assert body["status"] == "accepted"
     assert body["kind"] == "note"
     print("OK webhook note accepted")
+
+
+class _ImmediateBackgroundTasks:
+    def add_task(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
+def test_note_ask_background_calls_run_ask():
+    from app.api.routes import _schedule_note_ask
+
+    with patch("app.api.routes.acquire_review_slot"), \
+         patch("app.api.routes.acquire_mr_review"), \
+         patch("app.api.routes.release_mr_review"), \
+         patch("app.api.routes.release_review_slot"), \
+         patch("app.api.routes._run_ask") as mock_run:
+        _schedule_note_ask(
+            _ImmediateBackgroundTasks(),
+            7,
+            3,
+            "@aicr 说明风险",
+            author_username="dev",
+            discussion_id="disc-1",
+            project_config={},
+        )
+    mock_run.assert_called_once()
+    assert mock_run.call_args[0][:3] == (7, 3, "说明风险")
+    print("OK note ask background calls run ask")
+
+
+def test_webhook_note_update_ignored():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "@aicr edited",
+            "noteable_type": "MergeRequest",
+            "action": "update",
+            "system": False,
+        },
+        "merge_request": {"iid": 3},
+        "project": {"id": 7},
+        "user": {"username": "dev"},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", ""), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", True):
+        resp = client.post("/webhook/gitlab", json=payload)
+    assert resp.json()["status"] == "ignored"
+    print("OK webhook note update ignored")
+
+
+def test_describe_disabled_503():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", ""), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", True), \
+         patch("app.api.routes.AICR_DESCRIBE_ENABLED", False):
+        resp = client.post(
+            "/describe",
+            json={"project_id": 1, "mr_iid": 1},
+        )
+    assert resp.status_code == 503
+    print("OK describe disabled 503")
+
+
+def test_diff_text_truncation():
+    from app.tools.diff_text import build_diff_text_from_context
+    from app.gitlab.context_builder import MRContext
+
+    ctx = MRContext()
+    ctx.changed_files = [{
+        "new_path": "big.txt",
+        "diff": "x" * 500,
+        "is_supported": True,
+    }]
+    text = build_diff_text_from_context(ctx, max_chars=100)
+    assert len(text) <= 120
+    assert "truncated" in text
+    print("OK diff text truncation")
 
 
 def test_llm_factory_missing_key():
@@ -1178,6 +1264,10 @@ if __name__ == "__main__":
         test_describe_prompt_untrusted,
         test_webhook_note_ignored,
         test_webhook_note_accepted,
+        test_note_ask_background_calls_run_ask,
+        test_webhook_note_update_ignored,
+        test_describe_disabled_503,
+        test_diff_text_truncation,
         test_llm_factory_missing_key,
     ]
     for fn in tests:

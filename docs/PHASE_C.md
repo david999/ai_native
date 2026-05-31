@@ -43,7 +43,9 @@ curl -s -X POST http://localhost:8001/changelog \
 
 用户在 MR 评论中包含触发词（默认 `@aicr` 或 `/ask`）时，服务异步调用 LLM 并在同 discussion 回复（失败则回退为 MR note）。
 
-- 忽略系统 note、机器人自身用户名、`**AICR**` 开头的回复，避免循环。
+- 仅处理 note **`action=create`**（编辑评论不会重复触发）。
+- 忽略系统 note、机器人自身用户名（`AICR_BOT_USERNAME` 须与 PAT 对应 GitLab 用户名一致）、`**AICR**` / `## AICR Changelog` 等机器人 note 前缀。
+- `@aicr` 使用词边界匹配，避免误匹配 `user@aicr.com`。
 - 关闭：`AICR_ASK_ENABLED=0` 或 `AICR_WEBHOOK_NOTE_ENABLED=0`。
 
 ## 模块
