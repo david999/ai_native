@@ -57,7 +57,9 @@ docker compose -f docker-compose.yml \
 | `GET /health` | 健康检查（仅 `status`） |
 | `GET /health/detail` | 详细配置探测（内网/运维用） |
 | `POST /review` | CI 触发；Header `X-AICR-Secret`（若配置了 `REVIEW_API_SECRET`） |
-| `POST /webhook/gitlab` | 需 `GITLAB_WEBHOOK_SECRET` |
+| `POST /describe` | 生成 MR 描述（阶段 C，见 [docs/PHASE_C.md](../docs/PHASE_C.md)） |
+| `POST /changelog` | 生成 CHANGELOG 并发布 MR note |
+| `POST /webhook/gitlab` | MR + **Note** 事件；需 `GITLAB_WEBHOOK_SECRET` |
 
 `POST /review` 响应字段：
 

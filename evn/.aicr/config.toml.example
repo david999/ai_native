@@ -1,0 +1,33 @@
+# 复制为 evn/.aicr/config.toml（或通过 AICR_CONFIG_PATH 指定路径）
+# 环境变量优先于本文件；密钥仍应放在 evn/.env
+
+[review]
+score_threshold = 60
+self_reflection = true
+filter_issues_to_diff = true
+
+[tools]
+describe_enabled = true
+# 为 true 时 POST /describe 可将生成内容写回 MR 描述
+describe_update_mr = false
+changelog_enabled = true
+ask_enabled = true
+# describe 写回 MR 后，在此秒数内跳过 MR update webhook 触发的全量评审
+suppress_review_after_describe = true
+describe_webhook_suppress_seconds = 120
+
+[ask]
+# 在 MR 评论中触发对话（Note webhook）
+triggers = ["@aicr", "/ask"]
+# 忽略机器人自身用户名，避免回复循环
+bot_username = "aicr-bot"
+
+[llm.describe]
+# model = ""          # 空则使用 LLM_MODEL
+temperature = 0.3
+
+[llm.changelog]
+temperature = 0.2
+
+[llm.ask]
+temperature = 0.4

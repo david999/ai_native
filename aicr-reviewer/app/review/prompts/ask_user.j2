@@ -1,0 +1,22 @@
+Answer the developer's question about this merge request.
+
+<untrusted_mr_metadata>
+Title: {{ mr_title }}
+Description:
+{{ mr_description }}
+</untrusted_mr_metadata>
+
+{% if thread_context %}
+## Recent discussion (for context)
+{{ thread_context }}
+{% endif %}
+
+<user_question>
+{{ user_question }}
+</user_question>
+
+## Changed files
+{{ changed_files_summary }}
+
+## Diff
+{{ diff_text }}

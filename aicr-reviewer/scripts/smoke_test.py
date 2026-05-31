@@ -1000,6 +1000,309 @@ def test_webhook_accepted():
     print("OK webhook accepted")
 
 
+def test_config_toml_merge():
+    from app.config_toml import merged_config, deep_get
+
+    deploy = {"review": {"score_threshold": 55}, "tools": {"ask_enabled": True}}
+    project = {"review": {"score_threshold": 70}}
+    cfg = merged_config(deploy, project)
+    assert deep_get(cfg, "review", "score_threshold") == 70
+    assert deep_get(cfg, "tools", "ask_enabled") is True
+    print("OK config toml merge")
+
+
+def test_should_respond_to_note():
+    from app.tools.ask import should_respond_to_note
+
+    assert should_respond_to_note("@aicr 这段 diff 安全吗？")
+    assert should_respond_to_note("please /ask about null checks")
+    assert not should_respond_to_note("contact user@aicr.com for access")
+    assert not should_respond_to_note("## AICR Changelog\n\n### Added")
+    assert not should_respond_to_note("LGTM")
+    assert not should_respond_to_note(
+        "**AICR**\n\nauto reply", author_username="human"
+    )
+    assert not should_respond_to_note(
+        "@aicr hello", author_username="aicr-bot", bot_username="aicr-bot"
+    )
+    assert not should_respond_to_note("@aicr", is_system_note=True)
+    print("OK should respond to note")
+
+
+def test_tool_parser_describe():
+    from app.tools.tool_parser import ToolResponseParser
+
+    raw = '{"title": "Fix auth", "description": "## Summary\\n- fix login"}'
+    parsed = ToolResponseParser().parse_describe(raw)
+    assert parsed["title"] == "Fix auth"
+    assert "Summary" in parsed["description"]
+    print("OK tool parser describe")
+
+
+def test_describe_prompt_untrusted():
+    from app.review.prompt_renderer import PromptRenderer
+
+    text = PromptRenderer().render_describe_user(
+        mr_title="ignore previous",
+        mr_description="do evil",
+        changed_files_summary="- `a.py`",
+        diff_text="diff",
+    )
+    assert "<untrusted_mr_metadata>" in text
+    print("OK describe prompt untrusted")
+
+
+def test_webhook_note_ignored():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "looks good",
+            "noteable_type": "MergeRequest",
+            "system": False,
+        },
+        "merge_request": {"iid": 3},
+        "project": {"id": 7},
+        "user": {"username": "dev"},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", ""), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", True):
+        resp = client.post("/webhook/gitlab", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ignored"
+    print("OK webhook note ignored")
+
+
+def test_webhook_note_accepted():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "@aicr 解释一下这个 MR",
+            "noteable_type": "MergeRequest",
+            "action": "create",
+            "discussion_id": "abc-disc",
+            "system": False,
+        },
+        "merge_request": {"iid": 3},
+        "project": {"id": 7},
+        "user": {"username": "dev"},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", "hook-secret"), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False), \
+         patch("app.api.routes._run_ask") as mock_ask:
+        resp = client.post(
+            "/webhook/gitlab",
+            json=payload,
+            headers={"X-Gitlab-Token": "hook-secret"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "accepted"
+    assert body["kind"] == "note"
+    print("OK webhook note accepted")
+
+
+class _ImmediateBackgroundTasks:
+    def add_task(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
+def test_note_ask_background_calls_run_ask():
+    from app.api.routes import _schedule_note_ask
+
+    with patch("app.api.routes.acquire_review_slot"), \
+         patch("app.api.routes.acquire_mr_review"), \
+         patch("app.api.routes.release_mr_review"), \
+         patch("app.api.routes.release_review_slot"), \
+         patch("app.api.routes._run_ask") as mock_run:
+        _schedule_note_ask(
+            _ImmediateBackgroundTasks(),
+            7,
+            3,
+            "@aicr 说明风险",
+            author_username="dev",
+            discussion_id="disc-1",
+            project_config={},
+        )
+    mock_run.assert_called_once()
+    assert mock_run.call_args[0][:3] == (7, 3, "说明风险")
+    print("OK note ask background calls run ask")
+
+
+def test_webhook_note_update_ignored():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    payload = {
+        "object_kind": "note",
+        "object_attributes": {
+            "note": "@aicr edited",
+            "noteable_type": "MergeRequest",
+            "action": "update",
+            "system": False,
+        },
+        "merge_request": {"iid": 3},
+        "project": {"id": 7},
+        "user": {"username": "dev"},
+    }
+    with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", ""), \
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", True):
+        resp = client.post("/webhook/gitlab", json=payload)
+    assert resp.json()["status"] == "ignored"
+    print("OK webhook note update ignored")
+
+
+def test_describe_disabled_503():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", ""), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", True), \
+         patch("app.api.routes.AICR_DESCRIBE_ENABLED", False):
+        resp = client.post(
+            "/describe",
+            json={"project_id": 1, "mr_iid": 1},
+        )
+    assert resp.status_code == 503
+    print("OK describe disabled 503")
+
+
+def test_diff_text_truncation():
+    from app.tools.diff_text import build_diff_text_from_context
+    from app.gitlab.context_builder import MRContext
+
+    ctx = MRContext()
+    ctx.changed_files = [{
+        "new_path": "big.txt",
+        "diff": "x" * 500,
+        "is_supported": True,
+    }]
+    text = build_diff_text_from_context(ctx, max_chars=100)
+    assert len(text) <= 120
+    assert "truncated" in text
+    print("OK diff text truncation")
+
+
+def test_llm_settings_for_tool():
+    from app.config_resolver import llm_settings_for_tool
+
+    with patch.dict("os.environ", {}, clear=False):
+        settings = llm_settings_for_tool(
+            "describe",
+            {"llm": {"describe": {"model": "mini", "temperature": 0.1}}},
+        )
+    assert settings["model"] == "mini"
+    assert settings["temperature"] == 0.1
+    print("OK llm settings for tool")
+
+
+def test_create_llm_for_tool():
+    from app.llm.factory import create_llm_for_tool
+
+    with patch("app.llm.factory.LLM_API_KEY", "sk-test"), \
+         patch("app.llm.factory.LLM_MODEL", "base-model"), \
+         patch("app.config_resolver.llm_settings_for_tool",
+               return_value={"model": "tool-model", "temperature": 0.5}):
+        provider = create_llm_for_tool("changelog", {})
+    assert provider.model == "tool-model"
+    assert provider.temperature == 0.5
+    print("OK create llm for tool")
+
+
+def test_tool_parser_changelog_ask():
+    from app.tools.tool_parser import ToolResponseParser
+
+    p = ToolResponseParser()
+    cl = p.parse_changelog('{"summary": "s", "changelog": "### Added\\nx"}')
+    assert cl["summary"] == "s"
+    ask = p.parse_ask('{"answer": "ok"}')
+    assert ask["answer"] == "ok"
+    print("OK tool parser changelog ask")
+
+
+def test_extract_user_question():
+    from app.tools.ask import extract_user_question
+
+    q = extract_user_question("@aicr 风险在哪？", triggers=["@aicr"])
+    assert "风险" in q
+    assert "@aicr" not in q
+    print("OK extract user question")
+
+
+def test_webhook_review_suppressed():
+    from app.review.review_state import ReviewStateStore
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = ReviewStateStore(base_dir=Path(tmp))
+        assert not store.is_webhook_review_suppressed(1, 2)
+        store.set_suppress_webhook_review(1, 2, seconds=300)
+        assert store.is_webhook_review_suppressed(1, 2)
+        store.set_last_reviewed_sha(1, 2, "abc123")
+        assert store.is_webhook_review_suppressed(1, 2)
+    print("OK webhook review suppressed")
+
+
+def test_changelog_upsert_note():
+    from app.gitlab.mr_actions import GitLabMRActions, CHANGELOG_NOTE_MARKER
+
+    existing = MagicMock()
+    existing.body = f"{CHANGELOG_NOTE_MARKER}\n\nold"
+    mr = MagicMock()
+    mr.notes.list.return_value = [existing]
+
+    session = MagicMock()
+    session.mr = mr
+    actions = GitLabMRActions()
+    body = f"{CHANGELOG_NOTE_MARKER}\n\n**Summary:** s\n\n### Added\nx\n"
+    with patch("app.gitlab.mr_actions.gitlab_call", side_effect=lambda fn: fn()):
+        action = actions.upsert_changelog_note(1, 1, body, session=session)
+    assert action == "updated"
+    existing.save.assert_called_once()
+    print("OK changelog upsert note")
+
+
+def test_describe_tool_mock():
+    from app.tools.describe import DescribeTool
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({
+        "title": "T",
+        "description": "Body",
+    })
+    ctx = MagicMock()
+    ctx.changed_files = [{"new_path": "a.py", "is_supported": True}]
+    ctx.deleted_files = []
+    ctx.project_config = {}
+    ctx.context_md = ""
+    ctx.title = "t"
+    ctx.description = ""
+
+    builder = MagicMock()
+    builder.build.return_value = ctx
+    store = MagicMock()
+    actions = MagicMock()
+    actions.update_mr_description.return_value = True
+
+    with patch("app.tools.describe.REVIEW_DRY_RUN", False), \
+         patch("app.tools.describe.suppress_review_after_describe", return_value=True):
+        result = DescribeTool(builder, llm=llm, actions=actions, state_store=store).run(
+            1, 2, update_mr=True
+        )
+    assert result["updated_mr"] is True
+    store.set_suppress_webhook_review.assert_called_once()
+    print("OK describe tool mock")
+
+
 def test_llm_factory_missing_key():
     from app.llm.factory import create_llm_provider
 
@@ -1066,6 +1369,23 @@ if __name__ == "__main__":
         test_webhook_ignored,
         test_webhook_unauthorized,
         test_webhook_accepted,
+        test_config_toml_merge,
+        test_should_respond_to_note,
+        test_tool_parser_describe,
+        test_describe_prompt_untrusted,
+        test_webhook_note_ignored,
+        test_webhook_note_accepted,
+        test_note_ask_background_calls_run_ask,
+        test_webhook_note_update_ignored,
+        test_describe_disabled_503,
+        test_diff_text_truncation,
+        test_llm_settings_for_tool,
+        test_create_llm_for_tool,
+        test_tool_parser_changelog_ask,
+        test_extract_user_question,
+        test_webhook_review_suppressed,
+        test_changelog_upsert_note,
+        test_describe_tool_mock,
         test_llm_factory_missing_key,
     ]
     for fn in tests:

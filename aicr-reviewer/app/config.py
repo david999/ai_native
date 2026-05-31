@@ -30,9 +30,24 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+from app.config_toml import (  # noqa: E402
+    deep_get,
+    load_deploy_config,
+    toml_or_env_bool,
+    toml_or_env_float,
+    toml_or_env_str,
+    toml_or_env_triggers,
+)
+
+_DEPLOY_CONFIG = load_deploy_config()
+
 GITLAB_URL = os.getenv("GITLAB_URL", "http://localhost:8000")
 AICR_BOT_TOKEN = os.getenv("AICR_BOT_TOKEN", "")
-SCORE_THRESHOLD = float(os.getenv("AICR_SCORE_THRESHOLD", "60"))
+SCORE_THRESHOLD = toml_or_env_float(
+    "AICR_SCORE_THRESHOLD",
+    deep_get(_DEPLOY_CONFIG, "review", "score_threshold"),
+    60.0,
+)
 REVIEW_API_SECRET = os.getenv("REVIEW_API_SECRET", "")
 REVIEW_API_ALLOW_INSECURE = os.getenv("REVIEW_API_ALLOW_INSECURE", "0") == "1"
 
@@ -69,10 +84,68 @@ AICR_FETCH_FULL_FILE_ON_INCREMENTAL = (
 REVIEW_CHUNK_MAX_WORKERS = max(1, int(os.getenv("REVIEW_CHUNK_MAX_WORKERS", "2")))
 
 # 阶段 B：diff 内过滤、self-reflection、多语言 system 模板
-AICR_FILTER_ISSUES_TO_DIFF = os.getenv("AICR_FILTER_ISSUES_TO_DIFF", "1") == "1"
-AICR_SELF_REFLECTION = os.getenv("AICR_SELF_REFLECTION", "1") == "1"
-AICR_REFLECTION_SCORE_THRESHOLD = float(
-    os.getenv("AICR_REFLECTION_SCORE_THRESHOLD", str(SCORE_THRESHOLD))
+AICR_FILTER_ISSUES_TO_DIFF = toml_or_env_bool(
+    "AICR_FILTER_ISSUES_TO_DIFF",
+    deep_get(_DEPLOY_CONFIG, "review", "filter_issues_to_diff"),
+    True,
+)
+AICR_SELF_REFLECTION = toml_or_env_bool(
+    "AICR_SELF_REFLECTION",
+    deep_get(_DEPLOY_CONFIG, "review", "self_reflection"),
+    True,
+)
+AICR_REFLECTION_SCORE_THRESHOLD = toml_or_env_float(
+    "AICR_REFLECTION_SCORE_THRESHOLD",
+    deep_get(_DEPLOY_CONFIG, "review", "reflection_score_threshold"),
+    SCORE_THRESHOLD,
+)
+
+# 阶段 C：describe / CHANGELOG / 评论对话 / config.toml
+AICR_DESCRIBE_ENABLED = toml_or_env_bool(
+    "AICR_DESCRIBE_ENABLED",
+    deep_get(_DEPLOY_CONFIG, "tools", "describe_enabled"),
+    True,
+)
+AICR_DESCRIBE_UPDATE_MR = toml_or_env_bool(
+    "AICR_DESCRIBE_UPDATE_MR",
+    deep_get(_DEPLOY_CONFIG, "tools", "describe_update_mr"),
+    False,
+)
+AICR_CHANGELOG_ENABLED = toml_or_env_bool(
+    "AICR_CHANGELOG_ENABLED",
+    deep_get(_DEPLOY_CONFIG, "tools", "changelog_enabled"),
+    True,
+)
+AICR_ASK_ENABLED = toml_or_env_bool(
+    "AICR_ASK_ENABLED",
+    deep_get(_DEPLOY_CONFIG, "tools", "ask_enabled"),
+    True,
+)
+AICR_ASK_TRIGGERS = toml_or_env_triggers(
+    "AICR_ASK_TRIGGERS",
+    deep_get(_DEPLOY_CONFIG, "ask", "triggers"),
+    ["@aicr", "/ask"],
+)
+AICR_BOT_USERNAME = toml_or_env_str(
+    "AICR_BOT_USERNAME",
+    deep_get(_DEPLOY_CONFIG, "ask", "bot_username"),
+    "aicr-bot",
+)
+AICR_WEBHOOK_NOTE_ENABLED = toml_or_env_bool(
+    "AICR_WEBHOOK_NOTE_ENABLED",
+    deep_get(_DEPLOY_CONFIG, "tools", "webhook_note_enabled"),
+    True,
+)
+AICR_SUPPRESS_REVIEW_AFTER_DESCRIBE = toml_or_env_bool(
+    "AICR_SUPPRESS_REVIEW_AFTER_DESCRIBE",
+    deep_get(_DEPLOY_CONFIG, "tools", "suppress_review_after_describe"),
+    True,
+)
+AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS = int(
+    os.getenv(
+        "AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS",
+        str(deep_get(_DEPLOY_CONFIG, "tools", "describe_webhook_suppress_seconds") or 120),
+    )
 )
 
 GITLAB_WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "")

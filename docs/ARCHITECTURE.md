@@ -15,6 +15,8 @@ flowchart TB
 
     subgraph api [FastAPI]
         R["POST /review"]
+        D["POST /describe"]
+        C["POST /changelog"]
         W["POST /webhook/gitlab"]
         H["GET /health"]
     end
@@ -99,6 +101,13 @@ flowchart TB
 | `app/review/parser.py` | LLM JSON 解析与规范化 |
 | `app/review/prompt_renderer.py` | Jinja2 提示词 |
 | `app/utils/redact.py` | 敏感信息脱敏 |
+| `app/config_toml.py` | 阶段 C：`config.toml` 加载 |
+| `app/tools/describe.py` | MR 描述生成 |
+| `app/tools/changelog.py` | CHANGELOG note |
+| `app/tools/ask.py` | 评论对话 |
+| `app/gitlab/mr_actions.py` | MR 写回与 note 回复 |
+
+阶段 C 详见 [PHASE_C.md](PHASE_C.md)。
 
 ## HTTP 与失败策略
 
