@@ -109,6 +109,8 @@ Webhook 评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepte
 2. `<repo>/.env`
 3. `aicr-reviewer/.env`
 
+更细的类/函数、控制流分支与数据结构见 [CODE_REFERENCE.md](CODE_REFERENCE.md)。
+
 ## 扩展点
 
 - **项目上下文**：在仓库添加 `.llm/CONTEXT.md` 描述团队规范。
