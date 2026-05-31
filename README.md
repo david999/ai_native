@@ -35,6 +35,7 @@
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构与评审流水线 |
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | **源码级详细说明**（模块、分支、数据结构） |
 | [docs/SECRETS.md](docs/SECRETS.md) | 密钥与环境变量说明 |
+| [docs/GITHUB_ACCESS_CN_MOBILE.md](docs/GITHUB_ACCESS_CN_MOBILE.md) | **国内手机（华为/安卓）访问 GitHub**（Cursor Cloud 场景，已筛选可行方案） |
 
 ## 评审触发方式
 
