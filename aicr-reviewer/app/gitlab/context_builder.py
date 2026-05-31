@@ -1,8 +1,8 @@
 import logging
 from typing import Optional
 
-from app.gitlab.client import get_gitlab_client
-from app.config import CONTEXT_MAX_CHARS, SCORE_THRESHOLD
+from app.config import CONTEXT_MAX_CHARS
+from app.gitlab.session import GitLabMRSession, gitlab_call
 from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
@@ -13,12 +13,28 @@ SUPPORTED_EXTENSIONS = (
     ".dockerfile", ".gradle", ".toml",
 )
 
+# 无扩展名但常见的容器/构建文件
+SPECIAL_FILENAMES = frozenset({"dockerfile", "makefile", "gemfile"})
+
+
+def _is_supported_path(new_path: str, old_path: str) -> bool:
+    for path in (new_path, old_path):
+        if not path:
+            continue
+        lower = path.lower()
+        if lower.endswith(SUPPORTED_EXTENSIONS):
+            return True
+        base = lower.rsplit("/", 1)[-1]
+        if base in SPECIAL_FILENAMES:
+            return True
+    return False
+
 
 class MRContext:
     __slots__ = (
         "project_id", "mr_iid", "title", "description",
         "source_branch", "target_branch", "diff_refs",
-        "changes", "context_md", "changed_files",
+        "changes", "context_md", "changed_files", "gitlab_session",
     )
 
     def __init__(self):
@@ -32,40 +48,54 @@ class MRContext:
         self.changes: list = []
         self.context_md: str = ""
         self.changed_files: list = []
+        self.gitlab_session: Optional[GitLabMRSession] = None
 
 
 class ContextBuilder:
     """拉取 MR 变更列表，过滤 SUPPORTED_EXTENSIONS，并加载项目 LLM 上下文文档。"""
 
-    def build(self, project_id: int, mr_iid: int, extra_diff: str = "") -> MRContext:
-        gl = get_gitlab_client()
-        project = gl.projects.get(project_id)
-        mr = project.mergerequests.get(mr_iid)
+    def build(
+        self,
+        project_id: int,
+        mr_iid: int,
+        extra_diff: str = "",
+        session: Optional[GitLabMRSession] = None,
+    ) -> MRContext:
+        gl_session = session or GitLabMRSession(project_id, mr_iid)
+        project = gl_session.project
+        mr = gl_session.mr
 
         ctx = MRContext()
         ctx.project_id = project_id
         ctx.mr_iid = mr_iid
-        ctx.title = mr.title or ""
-        ctx.description = mr.description or ""
+        ctx.gitlab_session = gl_session
+        ctx.title = redact_secrets(mr.title or "")
+        ctx.description = redact_secrets(mr.description or "")
         ctx.source_branch = mr.source_branch
         ctx.target_branch = mr.target_branch
         ctx.diff_refs = mr.diff_refs
 
-        changes_data = mr.changes()
+        changes_data = gitlab_call(lambda: mr.changes())
         ctx.changes = changes_data.get("changes", [])
 
         ctx.changed_files = []
         for change in ctx.changes:
             new_path = change.get("new_path") or ""
             old_path = change.get("old_path") or ""
-            diff_text = change.get("diff", "")
-            is_supported = new_path.endswith(SUPPORTED_EXTENSIONS) or old_path.endswith(SUPPORTED_EXTENSIONS)
+            diff_text = redact_secrets(change.get("diff", ""))
+            is_supported = _is_supported_path(new_path, old_path)
 
             file_content = ""
             if is_supported and new_path:
                 try:
-                    raw = project.files.raw(file_path=new_path, ref=mr.source_branch)
-                    file_content = raw.decode("utf-8", errors="ignore")
+                    raw = gitlab_call(
+                        lambda np=new_path: project.files.raw(
+                            file_path=np, ref=mr.source_branch
+                        )
+                    )
+                    file_content = redact_secrets(
+                        raw.decode("utf-8", errors="ignore")
+                    )
                 except Exception as ex:
                     logger.debug(f"Skip full file {new_path}: {ex}")
 
@@ -81,7 +111,7 @@ class ContextBuilder:
             ctx.changed_files.insert(0, {
                 "old_path": "",
                 "new_path": "_ci_extra_diff.patch",
-                "diff": extra_diff,
+                "diff": redact_secrets(extra_diff),
                 "content": "",
                 "is_supported": True,
             })
@@ -97,7 +127,11 @@ class ContextBuilder:
     def _load_context_md(self, project, mr) -> str:
         for ref in (mr.source_branch, mr.target_branch):
             try:
-                raw = project.files.raw(file_path=".llm/CONTEXT.md", ref=ref)
+                raw = gitlab_call(
+                    lambda r=ref: project.files.raw(
+                        file_path=".llm/CONTEXT.md", ref=r
+                    )
+                )
                 content = raw.decode("utf-8", errors="ignore")
                 if len(content) > CONTEXT_MAX_CHARS:
                     logger.warning(

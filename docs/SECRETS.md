@@ -15,7 +15,11 @@
 
 | 变量 | 说明 |
 |------|------|
-| `REVIEW_API_SECRET` | CI 调用 `POST /review` 时 Header `X-AICR-Secret`；留空则本地不校验 |
+| `REVIEW_API_SECRET` | CI 调用 `POST /review` 时 Header `X-AICR-Secret`；生产必填 |
+| `REVIEW_API_ALLOW_INSECURE` | 仅本地：`1` 且未配置 secret 时允许 `/review`（会打 warning） |
+| `GITLAB_TIMEOUT_SECONDS` | GitLab API 超时（秒），默认 `30` |
+| `GITLAB_API_RETRIES` | GitLab API 失败重试次数，默认 `3` |
+| `REVIEW_MAX_CONCURRENT` | 最大并发评审数，默认 `2` |
 | `GITLAB_WEBHOOK_SECRET` | Webhook `X-Gitlab-Token` 校验；生产务必设置 |
 | `AICR_SCORE_THRESHOLD` | 通过分数线，默认 `60` |
 
@@ -46,7 +50,7 @@
 ## 安全实践
 
 1. **不要**将 `evn/.env`、Runner `config.toml`、GitLab `gitlab-secrets.json` 提交到 Git（已在根 `.gitignore` 排除）。
-2. 评审前会对 diff/上下文做 **脱敏**（`app/utils/redact.py`），但仍应避免在 MR 描述中粘贴真实密钥。
+2. 评审前会对 diff、上下文、**MR 标题/描述**及 CI 注入的 `extra_diff` 做 **脱敏**（`app/utils/redact.py`），但仍应避免在 MR 中粘贴真实密钥。
 3. 生产环境务必设置 `REVIEW_API_SECRET` 与 `GITLAB_WEBHOOK_SECRET`。
 4. `ROOT_PAT` 仅用于 GitLab 初始化/管理，与 Bot Token 职责分离。
 

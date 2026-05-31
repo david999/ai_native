@@ -2,7 +2,7 @@ import logging
 import hashlib
 from typing import Optional
 
-from app.gitlab.client import get_gitlab_client
+from app.gitlab.session import GitLabMRSession, gitlab_call
 from app.config import SCORE_THRESHOLD
 
 logger = logging.getLogger("aicr")
@@ -27,30 +27,34 @@ class GitLabPublisher:
         line: int,
         diff_refs: Optional[dict],
         category: str = "",
-    ):
+        session: Optional[GitLabMRSession] = None,
+    ) -> bool:
         fp = _make_fingerprint(file_path, line, category)
         if fp in self._seen:
             logger.debug(f"Duplicate comment skipped: {file_path}:{line} [{category}]")
-            return
+            return True
         self._seen.add(fp)
 
-        gl = get_gitlab_client()
-        project = gl.projects.get(project_id)
-        mr = project.mergerequests.get(mr_iid)
+        gl_session = session or GitLabMRSession(project_id, mr_iid)
+        mr = gl_session.mr
 
         if file_path and diff_refs and line > 0:
             try:
-                self._post_inline(mr, body, file_path, line, diff_refs)
+                gitlab_call(
+                    lambda: self._post_inline(mr, body, file_path, line, diff_refs)
+                )
                 logger.info(f"Posted inline discussion on {file_path}:{line}")
-                return
+                return True
             except Exception as e:
                 logger.warning(f"Inline discussion failed ({file_path}:{line}): {e}")
 
         try:
-            self._post_note(mr, body, file_path, line)
+            gitlab_call(lambda: self._post_note(mr, body, file_path, line))
             logger.info(f"Posted MR note fallback for {file_path}:{line}")
+            return True
         except Exception as e:
             logger.error(f"MR note fallback also failed: {e}")
+            return False
 
     def publish_summary(
         self,
@@ -60,10 +64,10 @@ class GitLabPublisher:
         summary: str,
         issue_count: int,
         threshold: float = SCORE_THRESHOLD,
-    ):
-        gl = get_gitlab_client()
-        project = gl.projects.get(project_id)
-        mr = project.mergerequests.get(mr_iid)
+        session: Optional[GitLabMRSession] = None,
+    ) -> bool:
+        gl_session = session or GitLabMRSession(project_id, mr_iid)
+        mr = gl_session.mr
 
         status = "PASSED" if score >= threshold else "FAILED"
         body = (
@@ -74,10 +78,12 @@ class GitLabPublisher:
             f"{summary}\n"
         )
         try:
-            mr.notes.create({"body": body})
+            gitlab_call(lambda: mr.notes.create({"body": body}))
             logger.info(f"Posted summary note for MR !{mr_iid}")
+            return True
         except Exception as e:
             logger.error(f"Failed to post summary: {e}")
+            return False
 
     @staticmethod
     def _post_inline(mr, body: str, file_path: str, new_line: int, diff_refs: dict):
