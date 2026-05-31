@@ -2,6 +2,8 @@
 
 本文档描述 **AICR Reviewer**（`aicr-reviewer/`）当前的测试策略、覆盖范围与运行方式，便于本地开发与 Cloud Agent 验证。
 
+> **在本地 PC 上怎么跑测试、怎么分层验收整个工程？** 见 **[LOCAL_PC_VERIFICATION.md](./LOCAL_PC_VERIFICATION.md)**（含 Windows / Linux 命令与 L1–L3 验收清单）。
+
 ## 测试分层概览
 
 | 层级 | 方式 | 依赖 | 用途 |
@@ -15,6 +17,8 @@
 
 ## 快速运行
 
+**Linux / macOS / Git Bash：**
+
 ```bash
 cd aicr-reviewer
 python3 -m venv .venv
@@ -23,9 +27,19 @@ pip install -r requirements.txt
 python scripts/smoke_test.py
 ```
 
-成功时最后一行输出：`All smoke tests passed.`
+**Windows PowerShell：**
 
-环境准备与端口说明见仓库根目录 [AGENTS.md](../AGENTS.md)。
+```powershell
+cd aicr-reviewer
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python scripts\smoke_test.py
+```
+
+成功时最后一行输出：`All 29 smoke tests passed.`
+
+更完整的本地环境说明、服务启动与 **L1/L2/L3 整体验收** 见 [LOCAL_PC_VERIFICATION.md](./LOCAL_PC_VERIFICATION.md)。端口与 Cloud 开发见 [AGENTS.md](../AGENTS.md)。
 
 ## 冒烟测试覆盖矩阵
 
@@ -96,9 +110,12 @@ python scripts/smoke_test.py
 
 ## 与文档、架构的交叉引用
 
-- 模块级说明与历史冒烟列表：[CODE_REFERENCE.md](./CODE_REFERENCE.md) 第 16 节
-- 架构与数据流：[ARCHITECTURE.md](./ARCHITECTURE.md)
-- 密钥与本地配置：[SECRETS.md](./SECRETS.md)
+| 文档 | 说明 |
+|------|------|
+| [LOCAL_PC_VERIFICATION.md](./LOCAL_PC_VERIFICATION.md) | 本地 PC 跑测试、启动服务、L1–L3 验收清单 |
+| [CODE_REFERENCE.md](./CODE_REFERENCE.md) | 源码级说明；第 16 节为历史冒烟列表 |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | 系统架构与数据流 |
+| [SECRETS.md](./SECRETS.md) | 密钥与本地配置 |
 
 ## 扩展测试的建议
 

@@ -13,7 +13,7 @@
 | 步骤 | 命令 |
 |------|------|
 | 依赖 | `cd aicr-reviewer && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt` |
-| 冒烟测试 | `cd aicr-reviewer && source .venv/bin/activate && python scripts/smoke_test.py`（覆盖说明见 `docs/TESTING.md`） |
+| 冒烟测试 | `cd aicr-reviewer && source .venv/bin/activate && python scripts/smoke_test.py`（覆盖见 `docs/TESTING.md`；本地 PC 验收见 `docs/LOCAL_PC_VERIFICATION.md`） |
 | 启动 API | `./scripts/run_local.sh` 或 `python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload`（工作目录为 `aicr-reviewer/`） |
 | 健康检查 | `curl http://localhost:8001/health` |
 

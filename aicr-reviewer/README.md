@@ -34,7 +34,7 @@ cd E:\ai_native\aicr-reviewer
 
 健康检查：`GET http://localhost:8001/health`
 
-冒烟测试：`python scripts/smoke_test.py`（详见 [docs/TESTING.md](../docs/TESTING.md)）
+冒烟测试：`python scripts/smoke_test.py`（用例矩阵 [docs/TESTING.md](../docs/TESTING.md)；**本地 PC 测试与整体验收** [docs/LOCAL_PC_VERIFICATION.md](../docs/LOCAL_PC_VERIFICATION.md)）
 
 ## Linux Docker 部署
 
