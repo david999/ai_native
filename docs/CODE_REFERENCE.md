@@ -390,58 +390,422 @@ flowchart TD
 
 ---
 
-## 7. LLM 层
+## 7. LLM 层（深入）
 
-### 7.1 `LLMProvider`（`app/llm/base.py`）
+`app/llm/` 是评审流水线中**唯一**与外部大模型 API 通信的包。上游由 `ReviewOrchestrator._review_chunk` 组装 `messages`；下游将返回字符串交给 `StructuredResponseParser`。本层**不**解析 JSON、**不**访问 GitLab。
 
-`typing.Protocol`，约定：
+更偏产品与提示词视角的说明见 [LLM_CODE_REVIEW.md](LLM_CODE_REVIEW.md)；本章聚焦**源码行为、请求形态、错误传播与扩展方式**。
 
-```python
-def chat(
-    self,
-    messages: List[Dict[str, str]],  # OpenAI 风格 role/content
-    *,
-    json_mode: bool = True,
-    max_tokens: Optional[int] = None,
-    temperature: Optional[float] = None,
-) -> str:  # 模型原始文本（期望 JSON）
+### 7.0 在流水线中的位置
+
+```mermaid
+flowchart LR
+    subgraph input [输入侧 本服务组装]
+        SYS[system_spring.j2]
+        USR[user_review.j2 + diff]
+        RED[redact_secrets]
+    end
+    subgraph llm_pkg [app/llm]
+        FAC[factory.create_llm_provider]
+        OAI[OpenAICompatibleProvider.chat]
+    end
+    subgraph output [输出侧 非 llm 包]
+        PAR[StructuredResponseParser]
+        ORCH[orchestrator 聚合]
+    end
+
+    SYS --> MSG[messages 2 条]
+    USR --> RED --> MSG
+    MSG --> OAI
+    FAC --> OAI
+    OAI -->|str 原始文本| PAR
+    PAR --> ORCH
 ```
 
-便于测试注入 `MagicMock`。
+| 阶段 | 负责模块 | 与 LLM 的关系 |
+|------|----------|----------------|
+| 分块预算 | `review/chunker.py` + `REVIEW_MAX_INPUT_TOKENS` | 限制 **prompt 侧** 字符量（约 4 字符/token） |
+| 脱敏 | `utils/redact.py` | 仅作用于送入 user 的 `diff_text`；`context_md` 在 `ContextBuilder` 已脱敏 |
+| 渲染 | `review/prompt_renderer.py` | 产出 system/user 字符串，**不**调用 LLM |
+| 调用 | `llm/openai_compat.py` | `POST` Chat Completions（经 `openai` SDK） |
+| 输出上限 | `LLM_MAX_TOKENS` | 限制 **completion** token 上限，与输入分块无关 |
+| 解析 | `review/parser.py` | 将 `chat()` 返回值变为 `{score, summary, issues}` |
 
-### 7.2 `create_llm_provider`（`factory.py`）
+### 7.1 生命周期：何时创建、复用几次
 
-**预设 `_PROVIDER_MAP`**
+```text
+POST /review 或 Webhook 后台任务
+  → routes._run_orchestrator()
+       → create_llm_provider()          # 每次评审请求新建一个 Provider
+       → ReviewOrchestrator(..., llm_provider=llm)
+            → run() 循环每个 chunk
+                 → _review_chunk() → llm.chat()   # 每块 1 次 HTTP（可能 +1 次 json 降级重试）
+```
 
-| `LLM_PROVIDER` | 默认 `api_base` |
-|----------------|-----------------|
-| `ctyun_openai` | `https://wishub-x6.ctyun.cn/v1` |
-| `deepseek` | `https://api.deepseek.com/v1` |
-| `zhipu` | `https://open.bigmodel.cn/api/paas/v4` |
-| `openai` | `https://api.openai.com/v1` |
+| 对象 | 作用域 | 说明 |
+|------|--------|------|
+| `OpenAI` SDK `client` | 单次 `create_llm_provider()` 内 | 构造于 `OpenAICompatibleProvider.__init__` |
+| `OpenAICompatibleProvider` | 单次 `orchestrator.run()` | 同一 MR 评审的多个 chunk **共用** 同一实例 |
+| HTTP 连接 | SDK 内部池化 | 无应用层显式连接池配置 |
 
-解析规则：
+**未实现**：跨请求 Provider 缓存、流式 `stream=True`、并发多 chunk 调用。
 
-- `api_base = LLM_API_BASE or preset["api_base"]`
-- 三者 `api_base`、`LLM_API_KEY`、`LLM_MODEL` 缺一 → `ValueError`
+### 7.2 `LLMProvider` 协议（`app/llm/base.py`）
 
-返回 `OpenAICompatibleProvider` 实例（structural subtyping，未显式 inherit Protocol）。
+使用 `typing.Protocol`（结构化子类型），**不要求**实现类显式 `inherit LLMProvider`。当前唯一生产实现为 `OpenAICompatibleProvider`；测试可用 `unittest.mock.MagicMock`。
 
-### 7.3 `OpenAICompatibleProvider.chat` 分支
+```python
+class LLMProvider(Protocol):
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        json_mode: bool = True,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> str: ...
+```
+
+| 参数 | 生产调用方是否传入 | 说明 |
+|------|-------------------|------|
+| `messages` | 是 | 固定 2 条：`system` + `user`，见 §7.6 |
+| `json_mode` | 是，恒为 `True` | 触发 `response_format: json_object` 及降级逻辑 |
+| `max_tokens` | **否** | 始终用实例构造时的 `self.max_tokens`（来自 `LLM_MAX_TOKENS`） |
+| `temperature` | **否** | 始终用 `self.temperature`（来自 `LLM_TEMPERATURE`） |
+
+**契约**：`json_mode=True` 时，返回值应为可被 `StructuredResponseParser` 解析的 JSON 文本（允许外包 markdown 代码块）；协议层**不**校验内容。
+
+### 7.3 工厂：`create_llm_provider`（`factory.py`）
+
+#### 7.3.1 预设表 `_PROVIDER_MAP`
+
+| `LLM_PROVIDER` | `preset["api_base"]` | 典型 `LLM_MODEL` 示例 |
+|----------------|----------------------|------------------------|
+| `ctyun_openai` | `https://wishub-x6.ctyun.cn/v1` | 按天翼文档填写 |
+| `deepseek` | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| `zhipu` | `https://open.bigmodel.cn/api/paas/v4` | `glm-4` 等 |
+| `openai` | `https://api.openai.com/v1` | `gpt-4o-mini` 等 |
+| *未知名* | `{}`（无 preset） | 必须自行配置 `LLM_API_BASE` |
+
+#### 7.3.2 `api_base` 解析（含易错点）
+
+源码逻辑：
+
+```python
+preset = _PROVIDER_MAP.get(provider, {})
+api_base = LLM_API_BASE or preset.get("api_base", "")
+```
+
+而 `app/config.py` 中：
+
+```python
+LLM_API_BASE = os.getenv("LLM_API_BASE", "https://wishub-x6.ctyun.cn/v1")
+```
+
+因此只要环境变量**未显式设置** `LLM_API_BASE`，模块加载后 `LLM_API_BASE` **恒为非空字符串**，`preset["api_base"]` **永远不会被采用**。
+
+| 场景 | 实际请求的 `base_url` |
+|------|-------------------------|
+| 仅设 `LLM_PROVIDER=deepseek`，未改 `LLM_API_BASE` | 仍为默认天翼 URL（**常见配置错误**） |
+| `LLM_PROVIDER=deepseek` 且 `LLM_API_BASE=https://api.deepseek.com/v1` | DeepSeek |
+| 自建网关 | `LLM_API_BASE=https://your-gateway/v1` |
+| 未知 provider + 自定义 base | 仅 `LLM_API_BASE` 有效 |
+
+**推荐做法**：切换厂商时**同时**修改 `LLM_PROVIDER`、`LLM_API_BASE`、`LLM_MODEL`、`LLM_API_KEY` 四套变量，并以 `/health` 的 `llm_provider` / `llm_model` 与日志 `Creating LLM provider: ... base=...` 核对。
+
+#### 7.3.3 工厂校验与失败路径
 
 ```mermaid
 flowchart TD
-    Start[chat json_mode=True] --> Try[create with response_format json_object]
-    Try -->|成功| Ret[返回 content]
-    Try -->|异常| Check{_json_mode_unsupported?}
-    Check -->|是| Retry[无 response_format 重试]
-    Check -->|否| Raise[向上抛出]
-    Retry --> Ret
+    Start[create_llm_provider] --> B{api_base 非空?}
+    B -->|否| V1[ValueError]
+    B -->|是| K{LLM_API_KEY 非空?}
+    K -->|否| V2[ValueError]
+    K -->|是| M{LLM_MODEL 非空?}
+    M -->|否| V3[ValueError]
+    M -->|是| OK[OpenAICompatibleProvider]
+    V1 --> R503[routes: HTTPException 503]
+    V2 --> R503
+    V3 --> R503
+    R503 --> FO[review: fail-open score=100]
 ```
 
-`_json_mode_unsupported`：异常消息含 `response_format`、`json_object` 或 `unsupported`（大小写不敏感）。
+`routes._run_orchestrator` 将 `ValueError` 转为 `HTTPException(503, "LLM provider not configured")`，`/review` 再 **fail-open**（不拦 MR）。
 
-日志记录 `usage.prompt_tokens` / `completion_tokens` / `total_tokens`（若 API 返回）。
+### 7.4 `OpenAICompatibleProvider` 实现（`openai_compat.py`）
+
+#### 7.4.1 构造与 HTTP 客户端
+
+```python
+self.client = OpenAI(
+    base_url=api_base,           # 兼容任意 OpenAI Chat Completions 网关
+    api_key=api_key,
+    timeout=timeout,               # LLM_TIMEOUT_SECONDS，整次请求上限（秒）
+    default_headers={"User-Agent": "aicr-reviewer/1.0"},
+)
+```
+
+| 实例属性 | 来源 | 用途 |
+|----------|------|------|
+| `self.model` | `LLM_MODEL` | 请求体 `model` |
+| `self.max_tokens` | `LLM_MAX_TOKENS` | 请求体 `max_tokens` |
+| `self.temperature` | `LLM_TEMPERATURE` | 请求体 `temperature` |
+
+依赖：`openai>=1.0.0`（见 `requirements.txt`），使用 **同步** `chat.completions.create`，无 async。
+
+#### 7.4.2 实际 HTTP 请求体（`chat` → `_complete`）
+
+每次 `_complete` 调用等价于向 `{api_base}/chat/completions` 发送 JSON，核心字段：
+
+```json
+{
+  "model": "<LLM_MODEL>",
+  "messages": [
+    { "role": "system", "content": "<system_prompt 全文>" },
+    { "role": "user", "content": "<user_prompt 全文 + 可选 chunk 注记>" }
+  ],
+  "max_tokens": 4096,
+  "temperature": 0.2,
+  "response_format": { "type": "json_object" }
+}
+```
+
+最后一项**仅**在 `json_mode=True` 的首次尝试时附带；降级重试时去掉 `response_format`。
+
+**未发送的 OpenAI 参数**（当前实现无）：`top_p`、`frequency_penalty`、`presence_penalty`、`seed`、`tools`、`stop`、`n>1`、logprobs 等。
+
+#### 7.4.3 `chat()` 控制流（含重试语义）
+
+```mermaid
+flowchart TD
+    Start[chat] --> Build[组装 base_kwargs]
+    Build --> JM{json_mode?}
+    JM -->|false| C1[_complete 无 response_format]
+    JM -->|true| Try[_complete + json_object]
+    Try -->|成功| Ret[return choices0.content]
+    Try -->|Exception| U{_json_mode_unsupported?}
+    U -->|true| Warn[warning 日志] --> C2[_complete 无 response_format]
+    U -->|false| Raise[原异常向上]
+    C1 --> Ret
+    C2 --> Ret
+```
+
+| 行为 | 说明 |
+|------|------|
+| 最多 HTTP 次数 | `json_mode=True` 时 **1 或 2** 次；`False` 时 1 次 |
+| 重试条件 | 仅当异常字符串匹配 `_json_mode_unsupported` |
+| 不重试的情况 | 401/403、超时、429、网络断开、模型不存在等 → 直接失败 |
+| 空 content | `choices[0].message.content or ""` → 空串交给 parser，通常 `ParseError` |
+
+**`_json_mode_unsupported(exc)`** 对 `str(exc).lower()` 做子串匹配，命中任一即降级：
+
+- `response_format`
+- `json_object`
+- `unsupported`
+
+注意：若厂商返回 **HTTP 200 但 JSON 非结构化**（未报错却未遵守 schema），**不会**触发第二次请求，由 `parser` 兜底或失败。
+
+#### 7.4.4 响应处理与可观测性
+
+```python
+resp = self.client.chat.completions.create(**kwargs)
+content = resp.choices[0].message.content or ""
+# usage 若存在则 INFO 日志：prompt_tokens, completion_tokens, total_tokens
+```
+
+| 日志（logger=`aicr`） | 时机 |
+|------------------------|------|
+| `LLM request: model=..., messages=2, json_mode=...` | 每次 `chat` 入口 |
+| `json_mode unsupported, retrying without response_format` | 降级重试前 |
+| `LLM usage: prompt=..., completion=..., total=...` | API 返回 `usage` 时 |
+| `Creating LLM provider: {provider}, base=..., model=...` | 工厂创建时 |
+
+**未记录**：完整 prompt/response 正文（避免泄露代码与密钥）；需在网关侧或临时加 debug 日志排查。
+
+### 7.5 两套 Token 预算（易混淆）
+
+| 环境变量 | 默认值 | 作用域 | 实现位置 |
+|----------|--------|--------|----------|
+| `REVIEW_MAX_INPUT_TOKENS` | `12000` | 每个 **chunk** 的 diff+全文 **输入** 估算 | `DiffChunker`：`max_chars = tokens × 4` |
+| `LLM_MAX_TOKENS` | `4096` | 单次 completion **输出** 上限 | `OpenAICompatibleProvider._complete` |
+
+```text
+一次 _review_chunk 的「输入体量」受 REVIEW_MAX_INPUT_TOKENS 约束
+一次 chat() 的「输出长度」受 LLM_MAX_TOKENS 约束
+
+若 issues 很多、summary 很长，可能出现：
+  - completion 被截断 → JSON 不完整 → ParseError → 该 chunk 记为 LLM 失败
+```
+
+**粗算单次 MR 成本（调用次数）**：
+
+```text
+LLM 调用次数 ≈ chunk 数量 × (1 或 2，若发生 json 降级)
+总 prompt 体量 ≈ Σ 每块 (len(system) + len(user))
+  其中 system 含完整 context_md（每块重复发送，无缓存）
+```
+
+大 MR、多 chunk 时 **system 提示（含 `.llm/CONTEXT.md`）会对每块重复计费**——优化成本可考虑缩短 `CONTEXT.md` 或后续做 prompt 缓存（当前未实现）。
+
+### 7.6 与 `ReviewOrchestrator._review_chunk` 的衔接
+
+#### 7.6.1 `messages` 组装（生产路径唯一调用点）
+
+```107:110:aicr-reviewer/app/review/orchestrator.py
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+```
+
+| 消息 | 内容来源 | 体量主要因素 |
+|------|----------|--------------|
+| `system` | `PromptRenderer.render_system(context_md=ctx.context_md, language_hint="Java/Spring")` | `CONTEXT_MAX_CHARS` 截断后的团队规范 + 固定 Spring 检查清单 |
+| `user` | `render_user(mr_title, mr_description, changed_files_summary, diff_text)` + `chunk_note` | 当前 chunk 内文件的 unified diff + 可选全文 |
+
+`diff_text` 生成顺序：`_build_diff_text(chunk["files"])` → `redact_secrets()`。
+
+多块时 `chunk_note` 示例：
+
+```text
+
+Note: chunk 2/3. Review only the files shown.
+```
+
+#### 7.6.2 调用与异常包装
+
+```112:120:aicr-reviewer/app/review/orchestrator.py
+        try:
+            raw = self.llm.chat(messages, json_mode=True)
+        except Exception as e:
+            raise LLMReviewError(f"LLM call failed: {e}") from e
+
+        try:
+            return self.parser.parse(raw)
+        except ParseError as e:
+            raise LLMReviewError(f"LLM response parse failed: {e}") from e
+```
+
+| 失败类型 | 异常类 | 在 `run()` 中 |
+|----------|--------|---------------|
+| SDK/网络/HTTP/超时 | `LLMReviewError("LLM call failed: ...")` | `llm_failures` += 1，`continue` |
+| 返回无法解析 | `LLMReviewError("LLM response parse failed: ...")` | 同上 |
+| 全部 chunk 失败 | `LLMReviewError` 合并消息 | 抛至 `routes` → fail-open |
+| 部分 chunk 失败 | 不抛 | `summary` 追加 `Partial LLM failures: ...` |
+
+**重要**：解析失败与 HTTP 失败在编排层**同等对待**，均视为该 chunk 的 LLM 失败。
+
+### 7.7 与 `StructuredResponseParser` 的契约
+
+LLM 层只保证返回 `str`；下列由 parser 完成（详见 §10）：
+
+| 步骤 | 行为 |
+|------|------|
+| 去 markdown 围栏 | `` ```json ... ``` `` |
+| `json.loads` | 失败则正则抽取含 `"score"` 与 `"issues"` 的对象 |
+| `_normalize` | `score` 钳制 0–100；issue 字段补默认 |
+
+期望的**逻辑 schema**（由 `system_spring.j2` 约束，非 JSON Schema 校验）：
+
+```json
+{
+  "score": 0,
+  "summary": "string",
+  "issues": [
+    {
+      "file": "path/from/repo/root",
+      "line": 0,
+      "severity": "critical|major|minor|info",
+      "category": "null_safety|security|...",
+      "message": "string",
+      "suggestion": "string"
+    }
+  ]
+}
+```
+
+`json_object` 模式仅提高 JSON 语法合法概率；**字段名错误、缺字段**仍靠 `_normalize` 默认值，**不会**触发 LLM 重试。
+
+### 7.8 LLM 相关失败传播总表
+
+| 触发点 | 异常/结果 | `/review` HTTP | `review_completed` | GitLab 评论 |
+|--------|-----------|----------------|-------------------|-------------|
+| 工厂 `ValueError` | 503 → fail-open | 200 | `false` | 无 |
+| 单 chunk `chat` 失败 | 记入 `llm_failures` | — | — | — |
+| 单 chunk `parse` 失败 | 同上 | — | — | — |
+| 全部 chunk 失败 | `LLMReviewError` | 200 | `false` | 无 |
+| 部分 chunk 成功 | 聚合成功块 | 200 | `true` | 发布成功块的 issues |
+| 全部 chunk 成功 | 正常 return | 200 | `true` | 全部发布 |
+
+Webhook 路径：LLM 失败仅写 error 日志，**不改变** 已返回的 `accepted` 响应。
+
+### 7.9 扩展：新增 Provider 实现
+
+**方式 A — 仍走 OpenAI 兼容网关（推荐）**
+
+1. 在 `evn/.env` 设置 `LLM_API_BASE`、`LLM_MODEL`、`LLM_API_KEY`。
+2. 可选：在 `_PROVIDER_MAP` 增加预设名，避免 base 写错。
+3. 确认网关支持 Chat Completions；若不支持 `json_object`，依赖 §7.4.3 自动降级 + parser 兜底。
+
+**方式 B — 非 OpenAI 协议（需改代码）**
+
+1. 新建 `app/llm/your_provider.py`，实现与 `LLMProvider` 相同的 `chat(...)` 签名。
+2. 修改 `factory.create_llm_provider` 按配置分支返回新类。
+3. 在 `smoke_test.py` 增加 Mock 或集成测试。
+
+**方式 C — 调整调用参数**
+
+-  per-request 温度/输出长度：在 `orchestrator._review_chunk` 传入 `self.llm.chat(..., max_tokens=N, temperature=T)`（需改调用方；协议已支持）。
+-  关闭 JSON 模式：`json_mode=False`（不推荐，解析失败率上升）。
+
+### 7.10 测试与本地 Mock
+
+`smoke_test.py` 中的 LLM 相关用例：
+
+| 测试 | 手法 | 断言 |
+|------|------|------|
+| `test_llm_failure_raises` | `llm.chat.side_effect = RuntimeError` | `orchestrator.run` → `LLMReviewError` |
+| `test_review_fail_open` | patch `_run_orchestrator` 抛 `LLMReviewError` | API `review_completed=false`, `score=100` |
+
+**单元测试 Parser 不经过真实 LLM**（`test_parser` 直接喂 JSON 字符串）。
+
+手动 Mock 示例：
+
+```python
+from unittest.mock import MagicMock
+
+llm = MagicMock()
+llm.chat.return_value = '{"score": 80, "summary": "ok", "issues": []}'
+orch = ReviewOrchestrator(ctx_builder, llm, publisher)
+```
+
+### 7.11 配置速查与 `/health` 对照
+
+| 变量 | `/health` 字段 | 说明 |
+|------|----------------|------|
+| `LLM_PROVIDER` | `llm_provider` | 仅展示，不参与 base 解析 |
+| `LLM_MODEL` | `llm_model` | |
+| `LLM_API_KEY` | `llm_key_set` | 布尔，不暴露密钥 |
+| — | 无 | `LLM_API_BASE` / 超时 / `LLM_MAX_TOKENS` 未在 health 暴露 |
+
+生产排障建议顺序：
+
+1. `GET /health` 确认 `llm_key_set=true`、模型名预期。
+2. 查日志 `Creating LLM provider` 的 `base=` 是否与厂商一致（§7.3.2）。
+3. 查 `LLM request` / `LLM usage` 是否出现；无 usage 可能是请求未到达或厂商不返回 usage。
+4. 若 `LLM response parse failed` 增多，抓一条原始 `raw`（临时日志）看是否截断或非 JSON。
+
+### 7.12 源码索引（LLM 包）
+
+| 符号 | 文件 | 说明 |
+|------|------|------|
+| `LLMProvider` | `base.py` | Protocol |
+| `create_llm_provider` | `factory.py` | 工厂入口 |
+| `_PROVIDER_MAP` | `factory.py` | 厂商 preset |
+| `OpenAICompatibleProvider` | `openai_compat.py` | 生产实现 |
+| `.chat` / `._complete` / `._json_mode_unsupported` | `openai_compat.py` | 请求与降级 |
+| 调用方 `llm.chat` | `orchestrator.py` | `_review_chunk` |
+| 工厂调用方 | `routes.py` | `_run_orchestrator` |
 
 ---
 
@@ -488,7 +852,7 @@ flowchart TD
 | User 摘要 | `_files_summary(chunk["files"])` → markdown 列表 ``- `path` `` |
 | Diff 正文 | `_build_diff_text` → `redact_secrets` |
 | 分块注记 | `total_chunks > 1` 时追加英文 Note |
-| LLM | `messages = [system, user]`；`llm.chat(..., json_mode=True)` |
+| LLM | `messages = [system, user]`；`llm.chat(..., json_mode=True)`（详见 **§7.6–§7.7**） |
 | 解析 | `parser.parse(raw)`；`ParseError` → 包装为 `LLMReviewError` |
 
 **`_build_diff_text` 单文件格式**
@@ -766,7 +1130,9 @@ sequenceDiagram
 | 修改分块策略 | `chunker.py` | `chunk_files`, `_maybe_truncate_file` |
 | 修改评分聚合 | `orchestrator.py` | `run()` 中 `min_score` 逻辑 |
 | 修改 fail-open | `routes.py` | `review()` 的 except 分支 |
-| 切换 LLM 厂商 | `.env` | `LLM_PROVIDER`, `LLM_API_BASE` |
+| 切换 LLM 厂商 | `.env` + `factory.py` | `LLM_PROVIDER`, `LLM_API_BASE`, `LLM_MODEL`（见 **§7.3.2** 易错点） |
+| 调整 LLM 输出长度/温度 | `.env` 或 `orchestrator._review_chunk` | `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`（见 **§7.5**） |
+| 新增非 OpenAI 协议厂商 | `app/llm/` | 见 **§7.9** |
 | 自定义团队规范 | 业务仓库 | `.llm/CONTEXT.md` |
 | 调整评审规则 | `prompts/system_spring.j2` | 模板正文 |
 | 行内评论失败行为 | `publisher.py` | `publish_issue`, `_post_inline` |
@@ -818,6 +1184,12 @@ chunk: { files: changed_files[], total_chars: int }
 
 6. **单例 GitLab 客户端**  
    修改 `GITLAB_URL`/token 后需重启进程才生效。
+
+7. **`LLM_API_BASE` 默认值覆盖 preset**  
+   `config.py` 为天翼 URL 提供了默认值，切换 `LLM_PROVIDER` 而不改 `LLM_API_BASE` 时请求仍可能发往错误 endpoint（见 **§7.3.2**）。
+
+8. **每 chunk 重复发送完整 system**  
+   `context_md` 在每个分块请求中重复，大上下文 + 多 chunk 会线性增加 prompt 费用（见 **§7.5**）。
 
 ---
 
