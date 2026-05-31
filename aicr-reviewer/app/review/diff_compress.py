@@ -69,8 +69,8 @@ def compress_change(change: dict) -> Tuple[dict | None, str | None]:
     raw_diff = change.get("diff") or ""
     compressed = compress_unified_diff(raw_diff)
     if not compressed.strip() and raw_diff.strip():
-        # 压缩后无有效 hunks（例如仅删除行）— 不送入 LLM
-        return None, None
+        # 压缩后无有效 hunks：记入删除列表，由评审流水线合成 chunk 送入 LLM
+        return None, path or old_path
 
     return {**change, "diff": compressed}, None
 

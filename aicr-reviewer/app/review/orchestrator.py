@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 
 from app.config import REVIEW_DRY_RUN, SCORE_THRESHOLD
 from app.exceptions import LLMReviewError, NoReviewableChangesError
-from app.gitlab.context_builder import ContextBuilder, MRContext
+from app.gitlab.context_builder import ContextBuilder, MRContext, _is_supported_path
 from app.gitlab.publisher import GitLabPublisher
 from app.gitlab.session import GitLabMRSession
 from app.llm.base import LLMProvider
@@ -15,6 +15,8 @@ from app.review.review_state import ReviewStateStore
 from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
+
+_DELETIONS_PLACEHOLDER = "_aicr_deletions_review.md"
 
 
 class ReviewOrchestrator:
@@ -47,12 +49,7 @@ class ReviewOrchestrator:
         ctx: MRContext = self.context_builder.build(
             project_id, mr_iid, extra_diff, session=gl_session, force_full=force_full
         )
-        chunks = self.chunker.chunk_files(ctx.changed_files)
-
-        if not chunks:
-            raise NoReviewableChangesError(
-                "No reviewable file changes in MR (supported extensions only)"
-            )
+        chunks = self._build_chunks(ctx)
 
         all_issues: list = []
         min_score = 100.0
@@ -60,9 +57,14 @@ class ReviewOrchestrator:
         llm_failures: list = []
 
         for i, chunk in enumerate(chunks):
-            logger.info(f"Reviewing chunk {i + 1}/{len(chunks)} ({chunk['total_chars']} chars)")
+            logger.info(
+                f"Reviewing chunk {i + 1}/{len(chunks)} "
+                f"({chunk.get('total_tokens', chunk.get('total_chars', 0))} tokens est.)"
+            )
             try:
-                chunk_result = self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+                chunk_result = self._review_chunk(
+                    ctx, chunk, chunk_index=i, total_chunks=len(chunks)
+                )
             except LLMReviewError as e:
                 llm_failures.append(str(e))
                 continue
@@ -107,18 +109,68 @@ class ReviewOrchestrator:
             "review_completed": review_completed,
         }
 
+    def _build_chunks(self, ctx: MRContext) -> List[Dict]:
+        chunks = self.chunker.chunk_files(ctx.changed_files)
+        if chunks:
+            return chunks
+
+        reviewable_deleted = [
+            p for p in ctx.deleted_files
+            if _is_supported_path(p, p) or _is_supported_path("", p)
+        ]
+        if reviewable_deleted:
+            logger.info(
+                f"MR !{ctx.mr_iid}: no diff chunks; reviewing {len(reviewable_deleted)} "
+                "deleted/deletion-only path(s)"
+            )
+            return [self._deletions_only_chunk(reviewable_deleted)]
+
+        raise NoReviewableChangesError(
+            "No reviewable file changes in MR (supported extensions only)"
+        )
+
+    @staticmethod
+    def _deletions_only_chunk(deleted_paths: List[str]) -> Dict:
+        lines = "\n".join(f"- `{p}`" for p in deleted_paths)
+        body = (
+            "## Files removed or deletion-only changes\n\n"
+            "The MR contains no added/modified hunks for supported file types, only "
+            "deletions or deletion-only patches. Review whether removing this code "
+            "introduces risk (e.g. lost auth checks, resource leaks).\n\n"
+            f"{lines}\n"
+        )
+        return {
+            "files": [{
+                "old_path": "",
+                "new_path": _DELETIONS_PLACEHOLDER,
+                "diff": body,
+                "content": "",
+                "is_supported": True,
+            }],
+            "total_chars": len(body),
+            "deletions_only": True,
+        }
+
     def _review_chunk(
         self, ctx: MRContext, chunk: Dict, chunk_index: int = 0, total_chunks: int = 1
     ) -> Dict[str, Any]:
-        language_hint = infer_language_hint(ctx.changed_files)
+        language_hint = infer_language_hint(chunk["files"])
         system_prompt = self.renderer.render_system(
             context_md=ctx.context_md,
             language_hint=language_hint,
         )
 
         changed_files_summary = self._files_summary(chunk["files"])
+        include_deleted = (
+            chunk_index == 0
+            and ctx.deleted_files
+            and not chunk.get("deletions_only")
+        )
         diff_text = redact_secrets(
-            self._build_diff_text(chunk["files"], deleted_files=ctx.deleted_files)
+            self._build_diff_text(
+                chunk["files"],
+                deleted_files=ctx.deleted_files if include_deleted else None,
+            )
         )
         if ctx.incremental_from_sha:
             diff_text = (

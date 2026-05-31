@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -43,7 +44,14 @@ class ReviewStateStore:
             "last_reviewed_sha": sha,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            if tmp.is_file():
+                tmp.unlink(missing_ok=True)
+            raise
         logger.info(f"Saved review state for project={project_id} MR !{mr_iid} sha={sha[:8]}")
 
     def clear(self, project_id: int, mr_iid: int) -> None:

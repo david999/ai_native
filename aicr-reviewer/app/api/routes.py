@@ -14,10 +14,14 @@ from app.config import (
     REVIEW_API_ALLOW_INSECURE,
 )
 from app.api.concurrency import (
+    acquire_mr_review,
     acquire_review_slot,
+    release_mr_review,
     release_review_slot,
+    MRReviewBusyError,
     ReviewCapacityError,
 )
+from app.review.review_state import ReviewStateStore
 from app.exceptions import LLMReviewError, NoReviewableChangesError, ReviewError
 from app.review.orchestrator import ReviewOrchestrator
 from app.gitlab.context_builder import ContextBuilder
@@ -99,10 +103,12 @@ def _run_orchestrator(
     except ValueError as e:
         raise HTTPException(status_code=503, detail="LLM provider not configured") from e
 
+    state_store = ReviewStateStore()
     orchestrator = ReviewOrchestrator(
-        context_builder=ContextBuilder(),
+        context_builder=ContextBuilder(state_store=state_store),
         llm_provider=llm,
         publisher=GitLabPublisher(),
+        state_store=state_store,
     )
     return orchestrator.run(
         project_id=project_id,
@@ -144,6 +150,12 @@ def review(req: ReviewRequest, request: Request):
         raise HTTPException(status_code=503, detail=str(e)) from e
 
     try:
+        acquire_mr_review(req.project_id, req.mr_iid)
+    except MRReviewBusyError as e:
+        release_review_slot()
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    try:
         try:
             result = _run_orchestrator(
                 req.project_id, req.mr_iid, req.diff, force_full=req.force_full
@@ -172,6 +184,7 @@ def review(req: ReviewRequest, request: Request):
             review_completed=result.get("review_completed", False),
         )
     finally:
+        release_mr_review(req.project_id, req.mr_iid)
         release_review_slot()
 
 
@@ -211,10 +224,18 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
             logger.error(f"Webhook review skipped (capacity): {e}")
             return
         try:
+            acquire_mr_review(project_id, mr_iid)
+        except MRReviewBusyError:
+            logger.info(
+                f"Webhook review skipped: MR !{mr_iid} already in progress"
+            )
+            return
+        try:
             _run_orchestrator(project_id, mr_iid)
         except Exception as e:
             logger.error(f"Webhook review failed: {e}", exc_info=True)
         finally:
+            release_mr_review(project_id, mr_iid)
             release_review_slot()
 
     background_tasks.add_task(_run_review)

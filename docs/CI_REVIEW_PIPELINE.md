@@ -35,6 +35,10 @@ MR Pipeline
 
 增量状态在 **评审成功且发布成功**（`review_completed=true`）后写入；`REVIEW_DRY_RUN=1` 时不更新。
 
+**仅删除/仅删行变更**：无 diff chunk 时会合成「删除评审」块调用 LLM，避免增量 SHA 卡死。
+
+**同一 MR 互斥**：并发 `POST /review` 或 Webhook 与 CI 同时触发时，后者返回 **409**（同步 API）或 Webhook 日志跳过（后台任务）。
+
 ## API 增量 / 全量
 
 ```json

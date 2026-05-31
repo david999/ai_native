@@ -136,6 +136,21 @@ def test_diff_compress_deletion_only_hunk():
     print("OK diff compress deletion-only hunk")
 
 
+def test_diff_compress_deletion_only_lines():
+    from app.review.diff_compress import compress_changes
+
+    changes = [{
+        "old_path": "Auth.java",
+        "new_path": "Auth.java",
+        "diff": "@@ -1,3 +1,2 @@\n keep\n-removed_line\n",
+        "deleted_file": False,
+    }]
+    files, deleted = compress_changes(changes)
+    assert files == []
+    assert deleted == ["Auth.java"]
+    print("OK diff compress deletion-only lines")
+
+
 def test_diff_compress_entire_file_delete():
     from app.review.diff_compress import compress_changes
 
@@ -292,6 +307,88 @@ def test_partial_chunk_incomplete():
     assert result["score"] == 95.0
     assert "Partial LLM failures" in result["summary"]
     print("OK partial chunk incomplete")
+
+
+def test_orchestrator_deletions_only():
+    from app.review.orchestrator import ReviewOrchestrator
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({
+        "score": 85,
+        "summary": "deletion ok",
+        "issues": [],
+    })
+
+    ctx = MagicMock()
+    ctx.changed_files = []
+    ctx.deleted_files = ["Removed.java"]
+    ctx.context_md = ""
+    ctx.title = "remove file"
+    ctx.description = ""
+    ctx.project_id = 1
+    ctx.mr_iid = 5
+    ctx.diff_refs = None
+    ctx.head_sha = "abc123"
+    ctx.incremental_from_sha = None
+
+    store = MagicMock()
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock(), state_store=store)
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", False):
+        orch.publisher.publish_summary = MagicMock(return_value=True)
+        result = orch.run(1, 5)
+
+    assert result["review_completed"] is True
+    assert result["score"] == 85.0
+    llm.chat.assert_called_once()
+    store.set_last_reviewed_sha.assert_called_once_with(1, 5, "abc123")
+    print("OK orchestrator deletions only")
+
+
+def test_mr_review_lock():
+    import threading
+    from app.api.concurrency import (
+        acquire_mr_review,
+        release_mr_review,
+        MRReviewBusyError,
+        reset_mr_locks_for_tests,
+    )
+
+    reset_mr_locks_for_tests()
+    acquire_mr_review(1, 99, timeout=1.0)
+    errors = []
+
+    def second():
+        try:
+            acquire_mr_review(1, 99, blocking=True, timeout=0.2)
+            errors.append("should not acquire")
+        except MRReviewBusyError:
+            pass
+
+    t = threading.Thread(target=second)
+    t.start()
+    t.join()
+    release_mr_review(1, 99)
+    reset_mr_locks_for_tests()
+    assert errors == []
+    print("OK mr review lock")
+
+
+def test_review_mr_busy_409():
+    from fastapi.testclient import TestClient
+    from main import app
+    from app.api.concurrency import MRReviewBusyError
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", ""), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", True), \
+         patch("app.api.routes.acquire_review_slot"), \
+         patch("app.api.routes.release_review_slot"), \
+         patch("app.api.routes.acquire_mr_review", side_effect=MRReviewBusyError("busy")):
+        resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
+    assert resp.status_code == 409
+    print("OK review mr busy 409")
 
 
 def test_orchestrator_success():
@@ -605,6 +702,7 @@ if __name__ == "__main__":
         test_parser_embedded_json,
         test_parser_skips_non_dict_issues,
         test_diff_compress_deletion_only_hunk,
+        test_diff_compress_deletion_only_lines,
         test_diff_compress_entire_file_delete,
         test_language_priority_sort,
         test_review_state_store,
@@ -615,6 +713,9 @@ if __name__ == "__main__":
         test_empty_chunks,
         test_llm_failure_raises,
         test_partial_chunk_incomplete,
+        test_orchestrator_deletions_only,
+        test_mr_review_lock,
+        test_review_mr_busy_409,
         test_orchestrator_success,
         test_redact,
         test_redact_aws_key,

@@ -48,13 +48,14 @@ flowchart TB
 ## 评审流水线（ReviewOrchestrator）
 
 1. **构建上下文**（`ContextBuilder`）
-   - 拉取 MR 元数据、变更文件列表与 diff。
+   - 拉取 MR 元数据、变更文件列表与 diff；**增量模式**下对 `last_reviewed_sha..head_sha` 做 `repository_compare`（状态见 `evn/.aicr-state/`）。
+   - **diff 压缩**（`diff_compress.py`）：整文件删除合并为列表；剔除 deletion-only hunks。
    - 对支持的扩展名尝试读取源分支完整文件内容。
    - 加载仓库内 `.llm/CONTEXT.md`（若存在），否则使用内置 Spring 默认约定。
    - CI 可经 `extra_diff` 注入额外 patch。
 
 2. **分块**（`DiffChunker`）
-   - 按 `REVIEW_MAX_INPUT_TOKENS` 估算字符上限切分多批，避免超出 LLM 上下文。
+   - 按 `REVIEW_MAX_INPUT_TOKENS` 用 **tiktoken**（可关闭）分块；文件按 MR 内扩展名频率排序优先装入 prompt。
    - 单文件过大时截断 diff 并丢弃全文内容。
 
 3. **调用 LLM**（每块一次）

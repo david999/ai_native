@@ -98,7 +98,10 @@ class ContextBuilder:
         ctx.changes = raw_changes
 
         compressed, deleted_paths = compress_changes(raw_changes)
-        ctx.deleted_files = deleted_paths
+        ctx.deleted_files = [
+            p for p in deleted_paths
+            if _is_supported_path(p, p) or _is_supported_path("", p)
+        ]
 
         ctx.changed_files = []
         for change in compressed:
