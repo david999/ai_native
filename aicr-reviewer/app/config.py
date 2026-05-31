@@ -61,5 +61,12 @@ AICR_STATE_DIR = Path(
     os.getenv("AICR_STATE_DIR", str(_MONOREPO_ROOT / "evn" / ".aicr-state"))
 )
 
+# 阶段 B / P2：增量时不拉全文、并行 chunk、相同 SHA 跳过
+AICR_FETCH_FULL_FILE = os.getenv("AICR_FETCH_FULL_FILE", "1") == "1"
+AICR_FETCH_FULL_FILE_ON_INCREMENTAL = (
+    os.getenv("AICR_FETCH_FULL_FILE_ON_INCREMENTAL", "0") == "1"
+)
+REVIEW_CHUNK_MAX_WORKERS = max(1, int(os.getenv("REVIEW_CHUNK_MAX_WORKERS", "2")))
+
 GITLAB_WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "")
 GITLAB_WEBHOOK_ALLOW_INSECURE = os.getenv("GITLAB_WEBHOOK_ALLOW_INSECURE", "0") == "1"

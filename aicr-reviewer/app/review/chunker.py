@@ -1,7 +1,7 @@
 """将 MR 变更文件按 token 预算切分为多个 LLM 请求块。"""
 
 import logging
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 from app.config import REVIEW_MAX_INPUT_TOKENS
 from app.review.language_priority import sort_by_language_priority
@@ -23,8 +23,7 @@ class DiffChunker:
         current_tokens = 0
 
         for f in ordered:
-            file_entry = self._maybe_truncate_file(f, max_tokens)
-            file_tokens = count_tokens(self._file_text(file_entry))
+            file_entry, file_tokens = self._prepare_file(f, max_tokens)
 
             if current_tokens + file_tokens > max_tokens and current_files:
                 chunks.append({
@@ -51,25 +50,26 @@ class DiffChunker:
         )
         return chunks
 
-    def _maybe_truncate_file(self, f: Dict, max_tokens: int) -> Dict:
+    def _prepare_file(self, f: Dict, max_tokens: int) -> Tuple[Dict, int]:
+        """准备单文件条目并返回 (entry, token_count)，每文件只 tokenize 一次。"""
         file_text = self._file_text(f)
         file_tokens = count_tokens(file_text)
         if file_tokens <= max_tokens:
-            return f
+            return f, file_tokens
 
         path = f.get("new_path") or f.get("old_path") or "?"
         logger.warning(
             f"Truncating {path} from ~{file_tokens} to ~{max_tokens} tokens"
         )
-        # 按字符比例粗截断 diff，再交给 tokenizer 在下一 chunk 边界处理
         ratio = max_tokens / max(file_tokens, 1)
         max_chars = max(500, int(len(file_text) * ratio * 0.95))
         truncated_diff = (f.get("diff") or "")[:max_chars]
-        return {
+        entry = {
             **f,
             "diff": truncated_diff + "\n... [truncated for token budget]",
             "content": "",
         }
+        return entry, count_tokens(self._file_text(entry))
 
     @staticmethod
     def _file_text(f: Dict) -> str:

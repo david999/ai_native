@@ -45,6 +45,9 @@
 | `AICR_INCREMENTAL_REVIEW` | `1` | `0` 关闭增量 compare |
 | `AICR_FORCE_FULL_REVIEW` | `0` | `1` 强制全量 MR diff |
 | `AICR_STATE_DIR` | `evn/.aicr-state` | 增量状态目录（勿提交 Git） |
+| `AICR_FETCH_FULL_FILE` | `1` | `0` 时不拉取源分支全文 |
+| `AICR_FETCH_FULL_FILE_ON_INCREMENTAL` | `0` | `1` 时增量 compare 也拉全文 |
+| `REVIEW_CHUNK_MAX_WORKERS` | `2` | 多块 MR 并行 LLM 调用上限（`1`=串行） |
 
 CI 组合 **reviewdog + AICR** 见 [CI_REVIEW_PIPELINE.md](./CI_REVIEW_PIPELINE.md)。
 

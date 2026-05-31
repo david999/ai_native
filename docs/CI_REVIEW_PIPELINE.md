@@ -39,6 +39,14 @@ MR Pipeline
 
 **同一 MR 互斥**：并发 `POST /review` 或 Webhook 与 CI 同时触发时，后者返回 **409**（同步 API）或 Webhook 日志跳过（后台任务）。
 
+**P2 优化**
+
+| 能力 | 配置 | 说明 |
+|------|------|------|
+| 增量不拉全文 | `AICR_FETCH_FULL_FILE_ON_INCREMENTAL=0`（默认） | 减少 GitLab API 与 token |
+| head 未变跳过 | （内置） | `last_reviewed_sha == head_sha` 时不调 LLM，发摘要 note |
+| 并行 chunk | `REVIEW_CHUNK_MAX_WORKERS=2` | 多块 MR 并行调 LLM（`1` 为串行） |
+
 ## API 增量 / 全量
 
 ```json

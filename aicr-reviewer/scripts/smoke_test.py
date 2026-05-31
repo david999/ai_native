@@ -227,9 +227,12 @@ def test_empty_chunks():
     from app.exceptions import NoReviewableChangesError
 
     orch = ReviewOrchestrator(MagicMock(), MagicMock(), MagicMock())
-    orch.context_builder.build = MagicMock(return_value=MagicMock(changed_files=[
-        {"new_path": "README.md", "is_supported": False}
-    ]))
+    empty_ctx = MagicMock(
+        changed_files=[{"new_path": "README.md", "is_supported": False}],
+        deleted_files=[],
+        skip_review=False,
+    )
+    orch.context_builder.build = MagicMock(return_value=empty_ctx)
     try:
         orch.run(1, 1)
         assert False, "expected NoReviewableChangesError"
@@ -307,6 +310,111 @@ def test_partial_chunk_incomplete():
     assert result["score"] == 95.0
     assert "Partial LLM failures" in result["summary"]
     print("OK partial chunk incomplete")
+
+
+def test_should_fetch_full_file():
+    from app.gitlab.context_builder import ContextBuilder
+
+    with patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE", True), \
+         patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE_ON_INCREMENTAL", False):
+        assert ContextBuilder._should_fetch_full_file(True) is False
+        assert ContextBuilder._should_fetch_full_file(False) is True
+
+    with patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE", True), \
+         patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE_ON_INCREMENTAL", True):
+        assert ContextBuilder._should_fetch_full_file(True) is True
+    print("OK should fetch full file")
+
+
+def test_orchestrator_skip_unchanged_sha():
+    from app.review.orchestrator import ReviewOrchestrator
+
+    ctx = MagicMock()
+    ctx.skip_review = True
+    ctx.skip_reason = "No new commits"
+    ctx.project_id = 1
+    ctx.mr_iid = 7
+    ctx.head_sha = "deadbeef"
+
+    orch = ReviewOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+    orch.publisher.publish_summary = MagicMock(return_value=True)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", False):
+        result = orch.run(1, 7)
+
+    assert result["review_completed"] is True
+    assert result["score"] == 100.0
+    orch.publisher.publish_summary.assert_called_once()
+    print("OK orchestrator skip unchanged sha")
+
+
+def test_chunker_single_tokenize_per_file():
+    from app.review.chunker import DiffChunker
+
+    calls = {"n": 0}
+    real_count = __import__("app.review.token_utils", fromlist=["count_tokens"]).count_tokens
+
+    def counting(text):
+        calls["n"] += 1
+        return real_count(text)
+
+    f = {
+        "new_path": "A.java",
+        "old_path": "A.java",
+        "diff": "+line\n" * 50,
+        "content": "",
+        "is_supported": True,
+    }
+    with patch("app.review.chunker.count_tokens", side_effect=counting):
+        DiffChunker().chunk_files([f])
+    assert calls["n"] == 1
+    print("OK chunker single tokenize per file")
+
+
+def test_orchestrator_parallel_chunks():
+    from app.review.orchestrator import ReviewOrchestrator
+    import time
+
+    llm = MagicMock()
+    call_times = []
+
+    def slow_chat(*_a, **_kw):
+        call_times.append(time.time())
+        time.sleep(0.15)
+        return json.dumps({"score": 90, "summary": "ok", "issues": []})
+
+    llm.chat.side_effect = slow_chat
+
+    ctx = MagicMock()
+    ctx.changed_files = [
+        {"new_path": f"F{i}.java", "old_path": f"F{i}.java", "diff": "+x",
+         "content": "", "is_supported": True}
+        for i in range(2)
+    ]
+    ctx.deleted_files = []
+    ctx.context_md = ""
+    ctx.title = ctx.description = ""
+    ctx.project_id = 1
+    ctx.mr_iid = 8
+    ctx.diff_refs = None
+    ctx.head_sha = ""
+    ctx.incremental_from_sha = None
+    ctx.skip_review = False
+
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", True), \
+         patch("app.review.orchestrator.REVIEW_CHUNK_MAX_WORKERS", 2), \
+         patch("app.review.chunker.REVIEW_MAX_INPUT_TOKENS", 10):
+        t0 = time.time()
+        orch.run(1, 8)
+        elapsed = time.time() - t0
+
+    assert llm.chat.call_count == 2
+    assert elapsed < 0.28
+    print("OK orchestrator parallel chunks")
 
 
 def test_orchestrator_deletions_only():
@@ -713,6 +821,10 @@ if __name__ == "__main__":
         test_empty_chunks,
         test_llm_failure_raises,
         test_partial_chunk_incomplete,
+        test_should_fetch_full_file,
+        test_orchestrator_skip_unchanged_sha,
+        test_chunker_single_tokenize_per_file,
+        test_orchestrator_parallel_chunks,
         test_orchestrator_deletions_only,
         test_mr_review_lock,
         test_review_mr_busy_409,

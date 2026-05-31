@@ -1,7 +1,8 @@
 import logging
-from typing import Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, Any, List, Union
 
-from app.config import REVIEW_DRY_RUN, SCORE_THRESHOLD
+from app.config import REVIEW_DRY_RUN, REVIEW_CHUNK_MAX_WORKERS, SCORE_THRESHOLD
 from app.exceptions import LLMReviewError, NoReviewableChangesError
 from app.gitlab.context_builder import ContextBuilder, MRContext, _is_supported_path
 from app.gitlab.publisher import GitLabPublisher
@@ -49,6 +50,9 @@ class ReviewOrchestrator:
         ctx: MRContext = self.context_builder.build(
             project_id, mr_iid, extra_diff, session=gl_session, force_full=force_full
         )
+        if getattr(ctx, "skip_review", False) is True:
+            return self._skipped_result(ctx, gl_session)
+
         chunks = self._build_chunks(ctx)
 
         all_issues: list = []
@@ -56,24 +60,16 @@ class ReviewOrchestrator:
         all_summaries: list = []
         llm_failures: list = []
 
-        for i, chunk in enumerate(chunks):
-            logger.info(
-                f"Reviewing chunk {i + 1}/{len(chunks)} "
-                f"({chunk.get('total_tokens', chunk.get('total_chars', 0))} tokens est.)"
-            )
-            try:
-                chunk_result = self._review_chunk(
-                    ctx, chunk, chunk_index=i, total_chunks=len(chunks)
-                )
-            except LLMReviewError as e:
-                llm_failures.append(str(e))
+        chunk_outcomes = self._review_all_chunks(ctx, chunks)
+        for i, outcome in enumerate(chunk_outcomes):
+            if isinstance(outcome, LLMReviewError):
+                llm_failures.append(str(outcome))
                 continue
-
-            all_issues.extend(chunk_result.get("issues", []))
-            chunk_score = chunk_result.get("score", 100.0)
+            all_issues.extend(outcome.get("issues", []))
+            chunk_score = outcome.get("score", 100.0)
             min_score = min(min_score, chunk_score)
-            if chunk_result.get("summary"):
-                all_summaries.append(chunk_result["summary"])
+            if outcome.get("summary"):
+                all_summaries.append(outcome["summary"])
 
         if llm_failures and len(llm_failures) == len(chunks):
             raise LLMReviewError("; ".join(llm_failures))
@@ -108,6 +104,79 @@ class ReviewOrchestrator:
             "code_quality": self._build_code_quality(all_issues),
             "review_completed": review_completed,
         }
+
+    def _skipped_result(
+        self, ctx: MRContext, gl_session: GitLabMRSession
+    ) -> Dict[str, Any]:
+        summary = ctx.skip_reason or "Review skipped: no new changes"
+        publish_ok = True
+        if not REVIEW_DRY_RUN:
+            publish_ok = self.publisher.publish_summary(
+                project_id=ctx.project_id,
+                mr_iid=ctx.mr_iid,
+                score=100.0,
+                summary=summary,
+                issue_count=0,
+                threshold=SCORE_THRESHOLD,
+                session=gl_session,
+            )
+        return {
+            "score": 100.0,
+            "summary": summary,
+            "issues": [],
+            "code_quality": [],
+            "review_completed": publish_ok,
+        }
+
+    def _review_all_chunks(
+        self, ctx: MRContext, chunks: List[Dict]
+    ) -> List[Union[Dict[str, Any], LLMReviewError]]:
+        workers = min(REVIEW_CHUNK_MAX_WORKERS, len(chunks))
+        if workers <= 1:
+            return self._review_chunks_sequential(ctx, chunks)
+
+        logger.info(f"Reviewing {len(chunks)} chunk(s) with {workers} worker(s)")
+        outcomes: List[Union[Dict[str, Any], LLMReviewError]] = [
+            LLMReviewError("not started")
+        ] * len(chunks)
+
+        def _run(i: int, chunk: Dict):
+            logger.info(
+                f"Reviewing chunk {i + 1}/{len(chunks)} "
+                f"({chunk.get('total_tokens', chunk.get('total_chars', 0))} tokens est.)"
+            )
+            return self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_run, i, chunk): i for i, chunk in enumerate(chunks)
+            }
+            for fut in as_completed(futures):
+                i = futures[fut]
+                try:
+                    outcomes[i] = fut.result()
+                except LLMReviewError as e:
+                    outcomes[i] = e
+                except Exception as e:
+                    outcomes[i] = LLMReviewError(f"LLM call failed: {e}")
+        return outcomes
+
+    def _review_chunks_sequential(
+        self, ctx: MRContext, chunks: List[Dict]
+    ) -> List[Union[Dict[str, Any], LLMReviewError]]:
+        outcomes: List[Union[Dict[str, Any], LLMReviewError]] = []
+        for i, chunk in enumerate(chunks):
+            logger.info(
+                f"Reviewing chunk {i + 1}/{len(chunks)} "
+                f"({chunk.get('total_tokens', chunk.get('total_chars', 0))} tokens est.)"
+            )
+            try:
+                outcomes.append(
+                    self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+                )
+            except LLMReviewError as e:
+                outcomes.append(e)
+        return outcomes
 
     def _build_chunks(self, ctx: MRContext) -> List[Dict]:
         chunks = self.chunker.chunk_files(ctx.changed_files)
