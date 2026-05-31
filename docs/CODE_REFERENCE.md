@@ -7,6 +7,9 @@
 | 文档 | 侧重 |
 |------|------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 组件关系、流水线概览、失败策略表 |
+| [GITHUB_REFERENCES.md](GITHUB_REFERENCES.md) | **外部项目概念借鉴**（pr-agent / ai-pr-reviewer / reviewdog）与阶段 A/B/C 落点 |
+| [PHASE_C.md](PHASE_C.md) | describe / CHANGELOG / 评论对话 / config.toml |
+| [CI_REVIEW_PIPELINE.md](CI_REVIEW_PIPELINE.md) | CI 与 reviewdog → AICR 串联 |
 | [LLM_CODE_REVIEW.md](LLM_CODE_REVIEW.md) | LLM 提示词、门禁语义、运维建议 |
 | [SECRETS.md](SECRETS.md) | 环境变量与安全 |
 | [aicr-reviewer/README.md](../aicr-reviewer/README.md) | 部署、API、本地启动 |
@@ -20,28 +23,41 @@
 ```
 /workspace                          # 仓库根（config 中 _MONOREPO_ROOT）
 ├── evn/.env                        # 推荐的环境变量（不提交密钥）
-├── docs/                           # 架构与本文档
+├── docs/                           # 架构、本文档、GITHUB_REFERENCES 等
+├── evn/.aicr/config.toml.example   # 阶段 C 部署级 TOML 示例
 ├── aicr-reviewer/                  # FastAPI 应用根（uvicorn 工作目录）
 │   ├── main.py                     # FastAPI app 工厂
 │   ├── requirements.txt
 │   ├── app/
-│   │   ├── config.py               # 环境变量加载（模块 import 时执行）
+│   │   ├── config.py               # 环境变量 + TOML 默认值
+│   │   ├── config_toml.py          # 加载 evn/.aicr 与仓库 .aicr/config.toml
+│   │   ├── config_resolver.py      # 按 MR 合并配置（ask 触发词、llm.*）
 │   │   ├── exceptions.py
-│   │   ├── api/routes.py           # HTTP 入口
+│   │   ├── api/routes.py           # /review、/describe、/changelog、webhook
 │   │   ├── gitlab/
 │   │   │   ├── client.py           # python-gitlab 单例
-│   │   │   ├── context_builder.py  # MR → MRContext
-│   │   │   └── publisher.py        # 评论发布
+│   │   │   ├── context_builder.py  # MR → MRContext（含增量、project_config）
+│   │   │   ├── publisher.py        # 行内评论 / 摘要 note
+│   │   │   ├── mr_actions.py       # 更新 MR、changelog upsert、讨论回复
+│   │   │   └── session.py          # GitLabMRSession、gitlab_call 重试
+│   │   ├── tools/                  # 阶段 C：describe、changelog、ask
 │   │   ├── llm/
 │   │   │   ├── base.py             # LLMProvider Protocol
-│   │   │   ├── factory.py
+│   │   │   ├── factory.py          # create_llm_provider / create_llm_for_tool
 │   │   │   └── openai_compat.py
 │   │   ├── review/
-│   │   │   ├── orchestrator.py     # 流水线主编排
-│   │   │   ├── chunker.py
+│   │   │   ├── orchestrator.py     # 流水线主编排 + reflection + diff 过滤
+│   │   │   ├── chunker.py          # tiktoken 分块
+│   │   │   ├── diff_compress.py    # 阶段 A 压缩
+│   │   │   ├── diff_line_index.py  # 阶段 B diff 内过滤
+│   │   │   ├── reflection.py       # 阶段 B self-reflection
+│   │   │   ├── score_utils.py      # 过滤后分数 reconcile
+│   │   │   ├── review_state.py     # last_reviewed_sha、webhook 抑制
+│   │   │   ├── language_priority.py
+│   │   │   ├── token_utils.py
 │   │   │   ├── parser.py
 │   │   │   ├── prompt_renderer.py
-│   │   │   └── prompts/*.j2
+│   │   │   └── prompts/*.j2        # system_*、describe、changelog、ask
 │   │   └── utils/redact.py
 │   └── scripts/
 │       ├── ci_review_gate.sh       # CI 门禁（Runner 侧）
@@ -1133,8 +1149,10 @@ sequenceDiagram
 | 切换 LLM 厂商 | `.env` + `factory.py` | `LLM_PROVIDER`, `LLM_API_BASE`, `LLM_MODEL`（见 **§7.3.2** 易错点） |
 | 调整 LLM 输出长度/温度 | `.env` 或 `orchestrator._review_chunk` | `LLM_MAX_TOKENS`, `LLM_TEMPERATURE`（见 **§7.5**） |
 | 新增非 OpenAI 协议厂商 | `app/llm/` | 见 **§7.9** |
-| 自定义团队规范 | 业务仓库 | `.llm/CONTEXT.md` |
-| 调整评审规则 | `prompts/system_spring.j2` | 模板正文 |
+| 自定义团队规范 | 业务仓库 | `.llm/CONTEXT.md`、`.aicr/config.toml` |
+| 调整评审规则 | `prompts/system_*.j2` | 按语言选模板（见 `language_priority.resolve_system_template`） |
+| describe / changelog / ask | `app/tools/*.py`, `routes.py` | 阶段 C；参考 [GITHUB_REFERENCES.md](GITHUB_REFERENCES.md) |
+| 外部借鉴登记 | `docs/GITHUB_REFERENCES.md` | §3 表格 |
 | 行内评论失败行为 | `publisher.py` | `publish_issue`, `_post_inline` |
 | CI 阈值 | `.env` + CI 变量 | `AICR_SCORE_THRESHOLD` |
 
@@ -1179,8 +1197,8 @@ chunk: { files: changed_files[], total_chars: int }
 4. **`Publisher._seen` 不跨 MR 持久**  
    每次 `run()` 新建 Publisher；同一 MR 多次评审可能重复相似评论（fingerprint 仅批次内）。
 
-5. **`language_hint` 写死**  
-   `orchestrator._review_chunk` 固定 `"Java/Spring"`；非 Java 项目需改代码或模板。
+5. **`language_hint`**  
+   已由 `infer_language_hint()` + `system_*.j2` 按扩展名选择；无匹配时回退 `system_general.j2`。
 
 6. **单例 GitLab 客户端**  
    修改 `GITLAB_URL`/token 后需重启进程才生效。
@@ -1200,11 +1218,22 @@ chunk: { files: changed_files[], total_chars: int }
 | `main.py` | `app` |
 | `app/config.py` | `_load_env_files`, 各常量 |
 | `app/exceptions.py` | `ReviewError`, `LLMReviewError`, `NoReviewableChangesError` |
-| `app/api/routes.py` | `review`, `gitlab_webhook`, `health`, `_fail_open_review`, `_verify_review_auth`, `_run_orchestrator` |
+| `app/api/routes.py` | `review`, `describe`, `changelog`, `gitlab_webhook`, `_schedule_note_ask`, `_run_orchestrator` |
+| `app/config_toml.py` | `load_deploy_config`, `load_project_config_from_repo`, `merged_config` |
+| `app/config_resolver.py` | `llm_settings_for_tool`, `ask_triggers_for_project` |
 | `app/gitlab/client.py` | `get_gitlab_client` |
-| `app/gitlab/context_builder.py` | `MRContext`, `ContextBuilder.build`, `_load_context_md`, `_default_context` |
-| `app/gitlab/publisher.py` | `GitLabPublisher.publish_issue`, `publish_summary`, `_post_inline`, `_post_note` |
-| `app/llm/factory.py` | `create_llm_provider`, `_PROVIDER_MAP` |
+| `app/gitlab/context_builder.py` | `MRContext`, `ContextBuilder.build`, `_fetch_changes`, `project_config` |
+| `app/gitlab/publisher.py` | `GitLabPublisher.publish_issue`, `publish_summary` |
+| `app/gitlab/mr_actions.py` | `update_mr_description`, `upsert_changelog_note`, `fetch_discussion_context` |
+| `app/tools/describe.py` | `DescribeTool.run` |
+| `app/tools/changelog.py` | `ChangelogTool.run` |
+| `app/tools/ask.py` | `AskTool.run`, `should_respond_to_note` |
+| `app/llm/factory.py` | `create_llm_provider`, `create_llm_for_tool` |
+| `app/review/diff_compress.py` | `compress_changes` |
+| `app/review/diff_line_index.py` | `filter_issues_to_diff` |
+| `app/review/reflection.py` | `run_reflection`, `should_reflect` |
+| `app/review/score_utils.py` | `reconcile_score`, `score_from_issues` |
+| `app/review/review_state.py` | `set_last_reviewed_sha`, `set_suppress_webhook_review` |
 | `app/llm/openai_compat.py` | `OpenAICompatibleProvider.chat`, `_complete`, `_json_mode_unsupported` |
 | `app/review/orchestrator.py` | `ReviewOrchestrator.run`, `_review_chunk`, `_publish_results`, `_build_code_quality` |
 | `app/review/chunker.py` | `DiffChunker.chunk_files`, `_maybe_truncate_file`, `_file_text` |
@@ -1216,4 +1245,4 @@ chunk: { files: changed_files[], total_chars: int }
 
 ---
 
-*文档版本与代码同步至仓库 `aicr-reviewer` 应用 `2.0.0`；若实现变更请优先对照源码更新本节。*
+*文档版本与代码同步至 `aicr-reviewer` 2.0.0（阶段 A/B/C）；外部借鉴见 [GITHUB_REFERENCES.md](GITHUB_REFERENCES.md)。冒烟测试约 70 项。*

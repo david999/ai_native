@@ -107,7 +107,7 @@ flowchart TB
 | `app/tools/ask.py` | 评论对话 |
 | `app/gitlab/mr_actions.py` | MR 写回与 note 回复 |
 
-阶段 C 详见 [PHASE_C.md](PHASE_C.md)。
+阶段 C 详见 [PHASE_C.md](PHASE_C.md)。阶段 A/B/C 与 **pr-agent、ai-pr-reviewer、reviewdog** 的概念借鉴对照见 [GITHUB_REFERENCES.md](GITHUB_REFERENCES.md)。
 
 ## HTTP 与失败策略
 

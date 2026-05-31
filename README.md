@@ -37,6 +37,8 @@
 | [docs/LLM_CODE_REVIEW.html](docs/LLM_CODE_REVIEW.html) | 同上（HTML 阅读版，含目录导航） |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构与评审流水线 |
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | **源码级详细说明**（模块、分支、数据结构） |
+| [docs/GITHUB_REFERENCES.md](docs/GITHUB_REFERENCES.md) | **外部开源参考**（pr-agent / ai-pr-reviewer / reviewdog 与阶段 A/B/C 落点） |
+| [docs/PHASE_C.md](docs/PHASE_C.md) | 阶段 C：describe、CHANGELOG、评论对话、config.toml |
 | [docs/SECRETS.md](docs/SECRETS.md) | 密钥与环境变量说明 |
 
 ## 评审触发方式
