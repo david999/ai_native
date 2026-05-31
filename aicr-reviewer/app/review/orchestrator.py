@@ -1,18 +1,23 @@
 import logging
-from typing import Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, Any, List, Union
 
-from app.config import REVIEW_DRY_RUN, SCORE_THRESHOLD
+from app.config import REVIEW_DRY_RUN, REVIEW_CHUNK_MAX_WORKERS, SCORE_THRESHOLD
 from app.exceptions import LLMReviewError, NoReviewableChangesError
-from app.gitlab.context_builder import ContextBuilder, MRContext
+from app.gitlab.context_builder import ContextBuilder, MRContext, _is_supported_path
 from app.gitlab.publisher import GitLabPublisher
 from app.gitlab.session import GitLabMRSession
 from app.llm.base import LLMProvider
 from app.review.chunker import DiffChunker
+from app.review.language_priority import infer_language_hint
 from app.review.prompt_renderer import PromptRenderer
 from app.review.parser import StructuredResponseParser, ParseError
+from app.review.review_state import ReviewStateStore
 from app.utils.redact import redact_secrets
 
 logger = logging.getLogger("aicr")
+
+_DELETIONS_PLACEHOLDER = "_aicr_deletions_review.md"
 
 
 class ReviewOrchestrator:
@@ -21,46 +26,50 @@ class ReviewOrchestrator:
         context_builder: ContextBuilder,
         llm_provider: LLMProvider,
         publisher: GitLabPublisher,
+        state_store: ReviewStateStore | None = None,
     ):
         self.context_builder = context_builder
         self.llm = llm_provider
         self.publisher = publisher
+        self.state_store = state_store or ReviewStateStore()
         self.chunker = DiffChunker()
         self.renderer = PromptRenderer()
         self.parser = StructuredResponseParser()
 
-    def run(self, project_id: int, mr_iid: int, extra_diff: str = "") -> Dict[str, Any]:
+    def run(
+        self,
+        project_id: int,
+        mr_iid: int,
+        extra_diff: str = "",
+        *,
+        force_full: bool = False,
+    ) -> Dict[str, Any]:
         logger.info(f"Starting review for project={project_id} MR !{mr_iid}")
 
         gl_session = GitLabMRSession(project_id, mr_iid)
         ctx: MRContext = self.context_builder.build(
-            project_id, mr_iid, extra_diff, session=gl_session
+            project_id, mr_iid, extra_diff, session=gl_session, force_full=force_full
         )
-        chunks = self.chunker.chunk_files(ctx.changed_files)
+        if getattr(ctx, "skip_review", False) is True:
+            return self._skipped_result(ctx, gl_session)
 
-        if not chunks:
-            raise NoReviewableChangesError(
-                "No reviewable file changes in MR (supported extensions only)"
-            )
+        chunks = self._build_chunks(ctx)
 
         all_issues: list = []
         min_score = 100.0
         all_summaries: list = []
         llm_failures: list = []
 
-        for i, chunk in enumerate(chunks):
-            logger.info(f"Reviewing chunk {i + 1}/{len(chunks)} ({chunk['total_chars']} chars)")
-            try:
-                chunk_result = self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
-            except LLMReviewError as e:
-                llm_failures.append(str(e))
+        chunk_outcomes = self._review_all_chunks(ctx, chunks)
+        for i, outcome in enumerate(chunk_outcomes):
+            if isinstance(outcome, LLMReviewError):
+                llm_failures.append(str(outcome))
                 continue
-
-            all_issues.extend(chunk_result.get("issues", []))
-            chunk_score = chunk_result.get("score", 100.0)
+            all_issues.extend(outcome.get("issues", []))
+            chunk_score = outcome.get("score", 100.0)
             min_score = min(min_score, chunk_score)
-            if chunk_result.get("summary"):
-                all_summaries.append(chunk_result["summary"])
+            if outcome.get("summary"):
+                all_summaries.append(outcome["summary"])
 
         if llm_failures and len(llm_failures) == len(chunks):
             raise LLMReviewError("; ".join(llm_failures))
@@ -81,6 +90,9 @@ class ReviewOrchestrator:
 
         review_completed = review_completed and publish_ok
 
+        if review_completed and ctx.head_sha and not REVIEW_DRY_RUN:
+            self.state_store.set_last_reviewed_sha(project_id, mr_iid, ctx.head_sha)
+
         logger.info(
             f"Review complete: score={final_score}, issues={len(all_issues)}, "
             f"review_completed={review_completed}"
@@ -93,16 +105,147 @@ class ReviewOrchestrator:
             "review_completed": review_completed,
         }
 
+    def _skipped_result(
+        self, ctx: MRContext, gl_session: GitLabMRSession
+    ) -> Dict[str, Any]:
+        summary = ctx.skip_reason or "Review skipped: no new changes"
+        publish_ok = True
+        if not REVIEW_DRY_RUN:
+            publish_ok = self.publisher.publish_summary(
+                project_id=ctx.project_id,
+                mr_iid=ctx.mr_iid,
+                score=100.0,
+                summary=summary,
+                issue_count=0,
+                threshold=SCORE_THRESHOLD,
+                session=gl_session,
+            )
+        return {
+            "score": 100.0,
+            "summary": summary,
+            "issues": [],
+            "code_quality": [],
+            "review_completed": publish_ok,
+        }
+
+    def _review_all_chunks(
+        self, ctx: MRContext, chunks: List[Dict]
+    ) -> List[Union[Dict[str, Any], LLMReviewError]]:
+        workers = min(REVIEW_CHUNK_MAX_WORKERS, len(chunks))
+        if workers <= 1:
+            return self._review_chunks_sequential(ctx, chunks)
+
+        logger.info(f"Reviewing {len(chunks)} chunk(s) with {workers} worker(s)")
+        outcomes: List[Union[Dict[str, Any], LLMReviewError]] = [
+            LLMReviewError("not started")
+        ] * len(chunks)
+
+        def _run(i: int, chunk: Dict):
+            logger.info(
+                f"Reviewing chunk {i + 1}/{len(chunks)} "
+                f"({chunk.get('total_tokens', chunk.get('total_chars', 0))} tokens est.)"
+            )
+            return self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_run, i, chunk): i for i, chunk in enumerate(chunks)
+            }
+            for fut in as_completed(futures):
+                i = futures[fut]
+                try:
+                    outcomes[i] = fut.result()
+                except LLMReviewError as e:
+                    outcomes[i] = e
+                except Exception as e:
+                    outcomes[i] = LLMReviewError(f"LLM call failed: {e}")
+        return outcomes
+
+    def _review_chunks_sequential(
+        self, ctx: MRContext, chunks: List[Dict]
+    ) -> List[Union[Dict[str, Any], LLMReviewError]]:
+        outcomes: List[Union[Dict[str, Any], LLMReviewError]] = []
+        for i, chunk in enumerate(chunks):
+            logger.info(
+                f"Reviewing chunk {i + 1}/{len(chunks)} "
+                f"({chunk.get('total_tokens', chunk.get('total_chars', 0))} tokens est.)"
+            )
+            try:
+                outcomes.append(
+                    self._review_chunk(ctx, chunk, chunk_index=i, total_chunks=len(chunks))
+                )
+            except LLMReviewError as e:
+                outcomes.append(e)
+        return outcomes
+
+    def _build_chunks(self, ctx: MRContext) -> List[Dict]:
+        chunks = self.chunker.chunk_files(ctx.changed_files)
+        if chunks:
+            return chunks
+
+        reviewable_deleted = [
+            p for p in ctx.deleted_files
+            if _is_supported_path(p, p) or _is_supported_path("", p)
+        ]
+        if reviewable_deleted:
+            logger.info(
+                f"MR !{ctx.mr_iid}: no diff chunks; reviewing {len(reviewable_deleted)} "
+                "deleted/deletion-only path(s)"
+            )
+            return [self._deletions_only_chunk(reviewable_deleted)]
+
+        raise NoReviewableChangesError(
+            "No reviewable file changes in MR (supported extensions only)"
+        )
+
+    @staticmethod
+    def _deletions_only_chunk(deleted_paths: List[str]) -> Dict:
+        lines = "\n".join(f"- `{p}`" for p in deleted_paths)
+        body = (
+            "## Files removed or deletion-only changes\n\n"
+            "The MR contains no added/modified hunks for supported file types, only "
+            "deletions or deletion-only patches. Review whether removing this code "
+            "introduces risk (e.g. lost auth checks, resource leaks).\n\n"
+            f"{lines}\n"
+        )
+        return {
+            "files": [{
+                "old_path": "",
+                "new_path": _DELETIONS_PLACEHOLDER,
+                "diff": body,
+                "content": "",
+                "is_supported": True,
+            }],
+            "total_chars": len(body),
+            "deletions_only": True,
+        }
+
     def _review_chunk(
         self, ctx: MRContext, chunk: Dict, chunk_index: int = 0, total_chunks: int = 1
     ) -> Dict[str, Any]:
+        language_hint = infer_language_hint(chunk["files"])
         system_prompt = self.renderer.render_system(
             context_md=ctx.context_md,
-            language_hint="Java/Spring",
+            language_hint=language_hint,
         )
 
         changed_files_summary = self._files_summary(chunk["files"])
-        diff_text = redact_secrets(self._build_diff_text(chunk["files"]))
+        include_deleted = (
+            chunk_index == 0
+            and ctx.deleted_files
+            and not chunk.get("deletions_only")
+        )
+        diff_text = redact_secrets(
+            self._build_diff_text(
+                chunk["files"],
+                deleted_files=ctx.deleted_files if include_deleted else None,
+            )
+        )
+        if ctx.incremental_from_sha:
+            diff_text = (
+                f"(Incremental review since `{ctx.incremental_from_sha[:8]}`)\n\n"
+                + diff_text
+            )
 
         chunk_note = ""
         if total_chunks > 1:
@@ -186,8 +329,11 @@ class ReviewOrchestrator:
         return "\n".join(lines)
 
     @staticmethod
-    def _build_diff_text(files: list) -> str:
+    def _build_diff_text(files: list, deleted_files: list | None = None) -> str:
         parts = []
+        if deleted_files:
+            lines = "\n".join(f"- `{p}`" for p in deleted_files)
+            parts.append(f"## Deleted files (no patch hunks)\n{lines}")
         for f in files:
             path = f.get("new_path") or f.get("old_path") or "?"
             header = f"diff --git a/{path} b/{path}"

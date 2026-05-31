@@ -52,5 +52,21 @@ REVIEW_MAX_INPUT_TOKENS = int(os.getenv("REVIEW_MAX_INPUT_TOKENS", "12000"))
 CONTEXT_MAX_CHARS = int(os.getenv("CONTEXT_MAX_CHARS", "8000"))
 REVIEW_DRY_RUN = os.getenv("REVIEW_DRY_RUN", "0") == "1"
 
+# 阶段 A：token 估算、增量评审状态
+REVIEW_USE_TIKTOKEN = os.getenv("REVIEW_USE_TIKTOKEN", "1") == "1"
+TIKTOKEN_ENCODING = os.getenv("TIKTOKEN_ENCODING", "cl100k_base")
+AICR_INCREMENTAL_REVIEW = os.getenv("AICR_INCREMENTAL_REVIEW", "1") == "1"
+AICR_FORCE_FULL_REVIEW = os.getenv("AICR_FORCE_FULL_REVIEW", "0") == "1"
+AICR_STATE_DIR = Path(
+    os.getenv("AICR_STATE_DIR", str(_MONOREPO_ROOT / "evn" / ".aicr-state"))
+)
+
+# 阶段 B / P2：增量时不拉全文、并行 chunk、相同 SHA 跳过
+AICR_FETCH_FULL_FILE = os.getenv("AICR_FETCH_FULL_FILE", "1") == "1"
+AICR_FETCH_FULL_FILE_ON_INCREMENTAL = (
+    os.getenv("AICR_FETCH_FULL_FILE_ON_INCREMENTAL", "0") == "1"
+)
+REVIEW_CHUNK_MAX_WORKERS = max(1, int(os.getenv("REVIEW_CHUNK_MAX_WORKERS", "2")))
+
 GITLAB_WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "")
 GITLAB_WEBHOOK_ALLOW_INSECURE = os.getenv("GITLAB_WEBHOOK_ALLOW_INSECURE", "0") == "1"

@@ -6,6 +6,7 @@ from typing import List, Dict
 
 from app.config import (
     AICR_BOT_TOKEN,
+    AICR_INCREMENTAL_REVIEW,
     GITLAB_WEBHOOK_SECRET,
     GITLAB_WEBHOOK_ALLOW_INSECURE,
     LLM_API_KEY,
@@ -13,10 +14,14 @@ from app.config import (
     REVIEW_API_ALLOW_INSECURE,
 )
 from app.api.concurrency import (
+    acquire_mr_review,
     acquire_review_slot,
+    release_mr_review,
     release_review_slot,
+    MRReviewBusyError,
     ReviewCapacityError,
 )
+from app.review.review_state import ReviewStateStore
 from app.exceptions import LLMReviewError, NoReviewableChangesError, ReviewError
 from app.review.orchestrator import ReviewOrchestrator
 from app.gitlab.context_builder import ContextBuilder
@@ -33,6 +38,7 @@ class ReviewRequest(BaseModel):
     project_id: int
     mr_iid: int
     diff: str = ""
+    force_full: bool = False
 
 
 class ReviewResult(BaseModel):
@@ -82,7 +88,13 @@ def _verify_review_auth(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def _run_orchestrator(project_id: int, mr_iid: int, extra_diff: str = "") -> dict:
+def _run_orchestrator(
+    project_id: int,
+    mr_iid: int,
+    extra_diff: str = "",
+    *,
+    force_full: bool = False,
+) -> dict:
     if not AICR_BOT_TOKEN:
         raise HTTPException(status_code=500, detail="AICR_BOT_TOKEN is not configured")
 
@@ -91,12 +103,19 @@ def _run_orchestrator(project_id: int, mr_iid: int, extra_diff: str = "") -> dic
     except ValueError as e:
         raise HTTPException(status_code=503, detail="LLM provider not configured") from e
 
+    state_store = ReviewStateStore()
     orchestrator = ReviewOrchestrator(
-        context_builder=ContextBuilder(),
+        context_builder=ContextBuilder(state_store=state_store),
         llm_provider=llm,
         publisher=GitLabPublisher(),
+        state_store=state_store,
     )
-    return orchestrator.run(project_id=project_id, mr_iid=mr_iid, extra_diff=extra_diff)
+    return orchestrator.run(
+        project_id=project_id,
+        mr_iid=mr_iid,
+        extra_diff=extra_diff,
+        force_full=force_full,
+    )
 
 
 @router.get("/health")
@@ -117,6 +136,7 @@ def health_detail():
         "review_auth_required": bool(REVIEW_API_SECRET),
         "review_api_allow_insecure": REVIEW_API_ALLOW_INSECURE,
         "review_max_concurrent": REVIEW_MAX_CONCURRENT,
+        "incremental_review": AICR_INCREMENTAL_REVIEW,
     }
 
 
@@ -130,8 +150,16 @@ def review(req: ReviewRequest, request: Request):
         raise HTTPException(status_code=503, detail=str(e)) from e
 
     try:
+        acquire_mr_review(req.project_id, req.mr_iid)
+    except MRReviewBusyError as e:
+        release_review_slot()
+        raise HTTPException(status_code=409, detail=str(e)) from e
+
+    try:
         try:
-            result = _run_orchestrator(req.project_id, req.mr_iid, req.diff)
+            result = _run_orchestrator(
+                req.project_id, req.mr_iid, req.diff, force_full=req.force_full
+            )
         except NoReviewableChangesError as e:
             logger.info(f"No reviewable changes: {e}")
             return ReviewResult(
@@ -156,6 +184,7 @@ def review(req: ReviewRequest, request: Request):
             review_completed=result.get("review_completed", False),
         )
     finally:
+        release_mr_review(req.project_id, req.mr_iid)
         release_review_slot()
 
 
@@ -195,10 +224,18 @@ async def gitlab_webhook(request: Request, background_tasks: BackgroundTasks):
             logger.error(f"Webhook review skipped (capacity): {e}")
             return
         try:
+            acquire_mr_review(project_id, mr_iid)
+        except MRReviewBusyError:
+            logger.info(
+                f"Webhook review skipped: MR !{mr_iid} already in progress"
+            )
+            return
+        try:
             _run_orchestrator(project_id, mr_iid)
         except Exception as e:
             logger.error(f"Webhook review failed: {e}", exc_info=True)
         finally:
+            release_mr_review(project_id, mr_iid)
             release_review_slot()
 
     background_tasks.add_task(_run_review)

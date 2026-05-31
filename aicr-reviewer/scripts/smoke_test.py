@@ -119,6 +119,95 @@ def test_chunker_splits_chunks():
     print("OK chunker splits chunks")
 
 
+def test_diff_compress_deletion_only_hunk():
+    from app.review.diff_compress import compress_unified_diff
+
+    diff = (
+        "@@ -1,3 +1,2 @@\n"
+        " line\n"
+        "-removed\n"
+        "@@ -10,2 +10,3 @@\n"
+        " ctx\n"
+        "+added\n"
+    )
+    out = compress_unified_diff(diff)
+    assert "-removed" not in out or "+added" in out
+    assert "+added" in out
+    print("OK diff compress deletion-only hunk")
+
+
+def test_diff_compress_deletion_only_lines():
+    from app.review.diff_compress import compress_changes
+
+    changes = [{
+        "old_path": "Auth.java",
+        "new_path": "Auth.java",
+        "diff": "@@ -1,3 +1,2 @@\n keep\n-removed_line\n",
+        "deleted_file": False,
+    }]
+    files, deleted = compress_changes(changes)
+    assert files == []
+    assert deleted == ["Auth.java"]
+    print("OK diff compress deletion-only lines")
+
+
+def test_diff_compress_entire_file_delete():
+    from app.review.diff_compress import compress_changes
+
+    changes = [{
+        "old_path": "gone.java",
+        "new_path": "gone.java",
+        "deleted_file": True,
+        "diff": "@@ -1 +0,0 @@\n-old\n",
+    }]
+    files, deleted = compress_changes(changes)
+    assert files == []
+    assert deleted == ["gone.java"]
+    print("OK diff compress entire file delete")
+
+
+def test_language_priority_sort():
+    from app.review.language_priority import sort_by_language_priority, infer_language_hint
+
+    files = [
+        {"new_path": "README.md", "old_path": "README.md"},
+        {"new_path": "src/Main.java", "old_path": "src/Main.java"},
+        {"new_path": "src/Util.java", "old_path": "src/Util.java"},
+    ]
+    ordered = sort_by_language_priority(files)
+    assert ordered[0]["new_path"].endswith(".java")
+    hint = infer_language_hint([
+        {"new_path": "a.py", "old_path": "a.py"},
+        {"new_path": "b.py", "old_path": "b.py"},
+    ])
+    assert hint == "Python"
+    print("OK language priority")
+
+
+def test_review_state_store():
+    from pathlib import Path
+    from app.review.review_state import ReviewStateStore
+
+    base = Path(__file__).resolve().parents[1] / ".tmp-smoke-state"
+    base.mkdir(exist_ok=True)
+    store = ReviewStateStore(base_dir=base)
+    store.set_last_reviewed_sha(9, 3, "abc123def")
+    assert store.get_last_reviewed_sha(9, 3) == "abc123def"
+    store.clear(9, 3)
+    assert store.get_last_reviewed_sha(9, 3) is None
+    print("OK review state store")
+
+
+def test_token_utils_fallback():
+    from app.review import token_utils
+
+    token_utils.reset_encoder_cache()
+    with patch("app.review.token_utils.REVIEW_USE_TIKTOKEN", False):
+        n = token_utils.count_tokens("abcd" * 10)
+        assert n == 10
+    print("OK token utils fallback")
+
+
 def test_chunker_skips_unsupported():
     from app.review.chunker import DiffChunker
 
@@ -138,9 +227,12 @@ def test_empty_chunks():
     from app.exceptions import NoReviewableChangesError
 
     orch = ReviewOrchestrator(MagicMock(), MagicMock(), MagicMock())
-    orch.context_builder.build = MagicMock(return_value=MagicMock(changed_files=[
-        {"new_path": "README.md", "is_supported": False}
-    ]))
+    empty_ctx = MagicMock(
+        changed_files=[{"new_path": "README.md", "is_supported": False}],
+        deleted_files=[],
+        skip_review=False,
+    )
+    orch.context_builder.build = MagicMock(return_value=empty_ctx)
     try:
         orch.run(1, 1)
         assert False, "expected NoReviewableChangesError"
@@ -218,6 +310,193 @@ def test_partial_chunk_incomplete():
     assert result["score"] == 95.0
     assert "Partial LLM failures" in result["summary"]
     print("OK partial chunk incomplete")
+
+
+def test_should_fetch_full_file():
+    from app.gitlab.context_builder import ContextBuilder
+
+    with patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE", True), \
+         patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE_ON_INCREMENTAL", False):
+        assert ContextBuilder._should_fetch_full_file(True) is False
+        assert ContextBuilder._should_fetch_full_file(False) is True
+
+    with patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE", True), \
+         patch("app.gitlab.context_builder.AICR_FETCH_FULL_FILE_ON_INCREMENTAL", True):
+        assert ContextBuilder._should_fetch_full_file(True) is True
+    print("OK should fetch full file")
+
+
+def test_orchestrator_skip_unchanged_sha():
+    from app.review.orchestrator import ReviewOrchestrator
+
+    ctx = MagicMock()
+    ctx.skip_review = True
+    ctx.skip_reason = "No new commits"
+    ctx.project_id = 1
+    ctx.mr_iid = 7
+    ctx.head_sha = "deadbeef"
+
+    orch = ReviewOrchestrator(MagicMock(), MagicMock(), MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+    orch.publisher.publish_summary = MagicMock(return_value=True)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", False):
+        result = orch.run(1, 7)
+
+    assert result["review_completed"] is True
+    assert result["score"] == 100.0
+    orch.publisher.publish_summary.assert_called_once()
+    print("OK orchestrator skip unchanged sha")
+
+
+def test_chunker_single_tokenize_per_file():
+    from app.review.chunker import DiffChunker
+
+    calls = {"n": 0}
+    real_count = __import__("app.review.token_utils", fromlist=["count_tokens"]).count_tokens
+
+    def counting(text):
+        calls["n"] += 1
+        return real_count(text)
+
+    f = {
+        "new_path": "A.java",
+        "old_path": "A.java",
+        "diff": "+line\n" * 50,
+        "content": "",
+        "is_supported": True,
+    }
+    with patch("app.review.chunker.count_tokens", side_effect=counting):
+        DiffChunker().chunk_files([f])
+    assert calls["n"] == 1
+    print("OK chunker single tokenize per file")
+
+
+def test_orchestrator_parallel_chunks():
+    from app.review.orchestrator import ReviewOrchestrator
+    import time
+
+    llm = MagicMock()
+    call_times = []
+
+    def slow_chat(*_a, **_kw):
+        call_times.append(time.time())
+        time.sleep(0.15)
+        return json.dumps({"score": 90, "summary": "ok", "issues": []})
+
+    llm.chat.side_effect = slow_chat
+
+    ctx = MagicMock()
+    ctx.changed_files = [
+        {"new_path": f"F{i}.java", "old_path": f"F{i}.java", "diff": "+x",
+         "content": "", "is_supported": True}
+        for i in range(2)
+    ]
+    ctx.deleted_files = []
+    ctx.context_md = ""
+    ctx.title = ctx.description = ""
+    ctx.project_id = 1
+    ctx.mr_iid = 8
+    ctx.diff_refs = None
+    ctx.head_sha = ""
+    ctx.incremental_from_sha = None
+    ctx.skip_review = False
+
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock())
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", True), \
+         patch("app.review.orchestrator.REVIEW_CHUNK_MAX_WORKERS", 2), \
+         patch("app.review.chunker.REVIEW_MAX_INPUT_TOKENS", 10):
+        t0 = time.time()
+        orch.run(1, 8)
+        elapsed = time.time() - t0
+
+    assert llm.chat.call_count == 2
+    assert elapsed < 0.28
+    print("OK orchestrator parallel chunks")
+
+
+def test_orchestrator_deletions_only():
+    from app.review.orchestrator import ReviewOrchestrator
+
+    llm = MagicMock()
+    llm.chat.return_value = json.dumps({
+        "score": 85,
+        "summary": "deletion ok",
+        "issues": [],
+    })
+
+    ctx = MagicMock()
+    ctx.changed_files = []
+    ctx.deleted_files = ["Removed.java"]
+    ctx.context_md = ""
+    ctx.title = "remove file"
+    ctx.description = ""
+    ctx.project_id = 1
+    ctx.mr_iid = 5
+    ctx.diff_refs = None
+    ctx.head_sha = "abc123"
+    ctx.incremental_from_sha = None
+
+    store = MagicMock()
+    orch = ReviewOrchestrator(MagicMock(), llm, MagicMock(), state_store=store)
+    orch.context_builder.build = MagicMock(return_value=ctx)
+
+    with patch("app.review.orchestrator.REVIEW_DRY_RUN", False):
+        orch.publisher.publish_summary = MagicMock(return_value=True)
+        result = orch.run(1, 5)
+
+    assert result["review_completed"] is True
+    assert result["score"] == 85.0
+    llm.chat.assert_called_once()
+    store.set_last_reviewed_sha.assert_called_once_with(1, 5, "abc123")
+    print("OK orchestrator deletions only")
+
+
+def test_mr_review_lock():
+    import threading
+    from app.api.concurrency import (
+        acquire_mr_review,
+        release_mr_review,
+        MRReviewBusyError,
+        reset_mr_locks_for_tests,
+    )
+
+    reset_mr_locks_for_tests()
+    acquire_mr_review(1, 99, timeout=1.0)
+    errors = []
+
+    def second():
+        try:
+            acquire_mr_review(1, 99, blocking=True, timeout=0.2)
+            errors.append("should not acquire")
+        except MRReviewBusyError:
+            pass
+
+    t = threading.Thread(target=second)
+    t.start()
+    t.join()
+    release_mr_review(1, 99)
+    reset_mr_locks_for_tests()
+    assert errors == []
+    print("OK mr review lock")
+
+
+def test_review_mr_busy_409():
+    from fastapi.testclient import TestClient
+    from main import app
+    from app.api.concurrency import MRReviewBusyError
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", ""), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", True), \
+         patch("app.api.routes.acquire_review_slot"), \
+         patch("app.api.routes.release_review_slot"), \
+         patch("app.api.routes.acquire_mr_review", side_effect=MRReviewBusyError("busy")):
+        resp = client.post("/review", json={"project_id": 1, "mr_iid": 1})
+    assert resp.status_code == 409
+    print("OK review mr busy 409")
 
 
 def test_orchestrator_success():
@@ -530,12 +809,25 @@ if __name__ == "__main__":
         test_parser_score_clamp,
         test_parser_embedded_json,
         test_parser_skips_non_dict_issues,
+        test_diff_compress_deletion_only_hunk,
+        test_diff_compress_deletion_only_lines,
+        test_diff_compress_entire_file_delete,
+        test_language_priority_sort,
+        test_review_state_store,
+        test_token_utils_fallback,
         test_chunker_truncation,
         test_chunker_splits_chunks,
         test_chunker_skips_unsupported,
         test_empty_chunks,
         test_llm_failure_raises,
         test_partial_chunk_incomplete,
+        test_should_fetch_full_file,
+        test_orchestrator_skip_unchanged_sha,
+        test_chunker_single_tokenize_per_file,
+        test_orchestrator_parallel_chunks,
+        test_orchestrator_deletions_only,
+        test_mr_review_lock,
+        test_review_mr_busy_409,
         test_orchestrator_success,
         test_redact,
         test_redact_aws_key,

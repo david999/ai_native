@@ -18,6 +18,9 @@ evn/gitlab/**/*.lock
 # GitLab Runner（config.toml 含 registration token）
 evn/gitlab-runner/
 
+# AICR 增量评审状态（运行时）
+evn/.aicr-state/
+
 # 兜底：evn 下所有日志与临时文件
 evn/**/*.log
 evn/**/current

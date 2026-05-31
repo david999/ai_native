@@ -48,13 +48,14 @@ flowchart TB
 ## 评审流水线（ReviewOrchestrator）
 
 1. **构建上下文**（`ContextBuilder`）
-   - 拉取 MR 元数据、变更文件列表与 diff。
+   - 拉取 MR 元数据、变更文件列表与 diff；**增量模式**下对 `last_reviewed_sha..head_sha` 做 `repository_compare`（状态见 `evn/.aicr-state/`）。
+   - **diff 压缩**（`diff_compress.py`）：整文件删除合并为列表；剔除 deletion-only hunks。
    - 对支持的扩展名尝试读取源分支完整文件内容。
    - 加载仓库内 `.llm/CONTEXT.md`（若存在），否则使用内置 Spring 默认约定。
    - CI 可经 `extra_diff` 注入额外 patch。
 
 2. **分块**（`DiffChunker`）
-   - 按 `REVIEW_MAX_INPUT_TOKENS` 估算字符上限切分多批，避免超出 LLM 上下文。
+   - 按 `REVIEW_MAX_INPUT_TOKENS` 用 **tiktoken**（可关闭）分块；文件按 MR 内扩展名频率排序优先装入 prompt。
    - 单文件过大时截断 diff 并丢弃全文内容。
 
 3. **调用 LLM**（每块一次）
@@ -77,7 +78,11 @@ flowchart TB
 | `app/api/routes.py` | HTTP 路由、鉴权、异常到 HTTP 状态映射 |
 | `app/config.py` | 从 `evn/.env` 等加载环境变量 |
 | `app/gitlab/client.py` | GitLab Python SDK 单例 |
-| `app/gitlab/context_builder.py` | MR 上下文与文件列表 |
+| `app/gitlab/context_builder.py` | MR 上下文与文件列表（含增量 compare） |
+| `app/review/diff_compress.py` | diff 压缩与删除文件列表 |
+| `app/review/token_utils.py` | tiktoken / 字符回退计数 |
+| `app/review/language_priority.py` | 文件排序与 language_hint 推断 |
+| `app/review/review_state.py` | 上次评审 head SHA 持久化 |
 | `app/gitlab/publisher.py` | 评论与摘要发布 |
 | `app/llm/factory.py` | 按 `LLM_PROVIDER` 创建客户端 |
 | `app/llm/openai_compat.py` | OpenAI 兼容 Chat Completions |
