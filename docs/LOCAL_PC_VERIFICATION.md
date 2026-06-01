@@ -62,7 +62,7 @@ notepad evn\.env
 
 ### 2.1 一级验收：冒烟测试（推荐每次改代码后执行）
 
-**不需要** GitLab、Docker、LLM 密钥。验证解析、分块、编排、脱敏、API 契约等 **29** 项逻辑。
+**不需要** GitLab、Docker、LLM 密钥。验证解析、分块、编排、脱敏、API 契约等 **70** 项逻辑（以 `smoke_test.py` 内 `tests` 列表为准）。
 
 #### Linux / macOS / Git Bash
 
@@ -87,7 +87,7 @@ python scripts\smoke_test.py
 **通过标准**：最后一行类似：
 
 ```text
-All 29 smoke tests passed.
+All 70 smoke tests passed.
 ```
 
 任一步断言失败会打印堆栈并退出，非零退出码。
@@ -146,7 +146,7 @@ PowerShell 等价：
 
 | 步骤 | 操作 | 通过标准 |
 |------|------|----------|
-| 1 | `python scripts/smoke_test.py` | `All 29 smoke tests passed.` |
+| 1 | `python scripts/smoke_test.py` | `All 70 smoke tests passed.` |
 | 2 | （可选）`compileall` | 无错误输出 |
 
 **结论**：核心 Python 模块与 HTTP 契约符合设计；**不保证** GitLab/LLM 外网可用。
@@ -208,7 +208,7 @@ docker compose -f docker-compose.yml \
 
 #### 3.3 真实 MR 评审验收
 
-1. 将 `test_data/spring-cloud-demo/`（或业务仓库）推送到 GitLab。
+1. 将 [test_data/spring-cloud-demo/](../test_data/README.md)（或业务仓库）推送到 GitLab；若 `test_data/` 为空，见 [test_data/README.md](../test_data/README.md) 克隆步骤。
 2. 创建 **Merge Request**（含 `.java` 等可评审文件变更）。
 3. 在业务仓库 CI 中配置 `aicr-reviewer/ci/gitlab-ci.snippet.yml` 同类 job，或手工调用：
 
@@ -250,7 +250,7 @@ curl -s -X POST http://localhost:8001/webhook/gitlab \
 
 ### 必做（L1）
 
-- [ ] `cd aicr-reviewer && python scripts/smoke_test.py` → 29 项全部通过
+- [ ] `cd aicr-reviewer && python scripts/smoke_test.py` → 70 项全部通过
 - [ ] （可选）`compileall` 无报错
 
 ### 推荐（L2）
@@ -290,6 +290,7 @@ curl -s -X POST http://localhost:8001/webhook/gitlab \
 |------|------|
 | [TESTING.md](./TESTING.md) | 冒烟用例矩阵、fail-open 语义、未覆盖项 |
 | [SECRETS.md](./SECRETS.md) | 环境变量与密钥 |
+| [docs/README.md](./README.md) | 文档地图 |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 系统架构与流水线 |
 | [aicr-reviewer/README.md](../aicr-reviewer/README.md) | API 与 CI 片段 |
 | [AGENTS.md](../AGENTS.md) | Cloud / 开发机快捷命令 |

@@ -11,11 +11,12 @@
 │   ├── deploy/             # Docker Compose 叠加配置
 │   ├── scripts/            # 本地启动与冒烟测试
 │   └── README.md           # 服务级运行与 API 说明
-├── docs/                   # 架构与密钥管理文档
-├── evn/                    # 环境配置（.env 模板、GitLab Compose）
+├── docs/                   # 架构与密钥管理文档（见 docs/README.md）
+├── evn/                    # 环境配置（见 evn/README.md）
 │   ├── .env.example        # 环境变量模板
+│   ├── .aicr/              # config.toml 模板（阶段 C）
 │   └── gitlab/             # GitLab CE + Runner 编排
-└── test_data/              # Demo 工程（可选，用于 MR 联调）
+└── test_data/              # Demo 工程（见 test_data/README.md，可选）
 ```
 
 ## 快速开始
@@ -29,6 +30,9 @@
 
 | 文档 | 说明 |
 |------|------|
+| [docs/README.md](docs/README.md) | **文档地图**、代码↔文档映射表 |
+| [evn/README.md](evn/README.md) | 环境目录、Compose 启动、gitignore 边界 |
+| [test_data/README.md](test_data/README.md) | Demo 独立 Git、CI 集成 |
 | [docs/LOCAL_PC_VERIFICATION.md](docs/LOCAL_PC_VERIFICATION.md) | **本地 PC**：测试命令、启动服务、L1–L3 整体验收 |
 | [docs/TESTING.md](docs/TESTING.md) | 冒烟用例覆盖矩阵与 fail-open 说明 |
 | [docs/CI_REVIEW_PIPELINE.md](docs/CI_REVIEW_PIPELINE.md) | **CI 流水线**：reviewdog + AICR、增量评审与阶段 A 配置 |

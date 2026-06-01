@@ -21,7 +21,7 @@
 ### 1.1 Monorepo 布局
 
 ```
-/workspace                          # 仓库根（config 中 _MONOREPO_ROOT）
+<repo>/                          # 仓库根（config 中 _MONOREPO_ROOT，如 E:\ai_native）
 ├── evn/.env                        # 推荐的环境变量（不提交密钥）
 ├── docs/                           # 架构、本文档、GITHUB_REFERENCES 等
 ├── evn/.aicr/config.toml.example   # 阶段 C 部署级 TOML 示例

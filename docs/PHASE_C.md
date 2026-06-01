@@ -6,7 +6,7 @@
 
 ### 部署级 `evn/.aicr/config.toml`
 
-复制 `evn/.aicr/config.toml.example` 为 `evn/.aicr/config.toml`（已 gitignore）。  
+复制 `evn/.aicr/config.toml.example` 为 `evn/.aicr/config.toml`（`config.toml` 已 gitignore；**example 可提交**）。  
 或通过 `AICR_CONFIG_PATH` 指定路径。
 
 **优先级**：已设置的环境变量 > `config.toml` > 代码默认值。

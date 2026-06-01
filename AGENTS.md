@@ -6,6 +6,15 @@
 
 **AICR Reviewer**：基于 FastAPI 的 GitLab MR 自动代码评审服务（Python 3 + pip）。核心代码在 `aicr-reviewer/`；共享环境变量在 `evn/.env`（从 `evn/.env.example` 复制，勿提交真实密钥）。
 
+## Documentation sync
+
+改 **行为 / API / 配置 / CI** 相关代码时，须在同一任务内更新对应 Markdown（见 [docs/README.md](docs/README.md) 映射表）。
+
+- Cursor 规则：[`.cursor/rules/docs-sync.mdc`](.cursor/rules/docs-sync.mdc)（全局）、[`docs-sync-aicr-reviewer.mdc`](.cursor/rules/docs-sync-aicr-reviewer.mdc)、[`docs-sync-evn.mdc`](.cursor/rules/docs-sync-evn.mdc)
+- 新增 env var → `evn/.env.example` + `docs/SECRETS.md`
+- 改 `scripts/smoke_test.py` → `docs/TESTING.md`
+- 验收：`cd aicr-reviewer && python scripts/smoke_test.py`
+
 ## Cursor Cloud specific instructions
 
 ### 开发与验证（无需 Docker）

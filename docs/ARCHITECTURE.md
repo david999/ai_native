@@ -82,6 +82,8 @@ flowchart TB
 | 路径 | 职责 |
 |------|------|
 | `app/api/routes.py` | HTTP 路由、鉴权、异常到 HTTP 状态映射 |
+| `app/api/concurrency.py` | 评审槽位与 MR 互斥锁 |
+| `app/config_resolver.py` | 按项目合并 TOML / ask 触发词 |
 | `app/config.py` | 从 `evn/.env` 等加载环境变量 |
 | `app/gitlab/client.py` | GitLab Python SDK 单例 |
 | `app/gitlab/context_builder.py` | MR 上下文与文件列表（含增量 compare） |
@@ -119,6 +121,7 @@ flowchart TB
 | 评审成功且达标 | 200，`review_completed=true`，高分 | 通过 |
 
 MR 是否被拦由 **`aicr-reviewer/scripts/ci_review_gate.sh`** 在 GitLab Runner 中判定，而非 HTTP 状态码。
+
 | Webhook 非 MR 或非 open/update/reopen | 200 ignored | 不触发评审 |
 
 Webhook 评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepted`。

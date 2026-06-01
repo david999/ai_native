@@ -52,6 +52,24 @@
 | `AICR_SELF_REFLECTION` | `1` | `0` 关闭二次 reflection LLM 调用 |
 | `AICR_REFLECTION_SCORE_THRESHOLD` | 同 `AICR_SCORE_THRESHOLD` | 低于该分或存在 critical/major 时触发 reflection |
 
+## 阶段 C（describe / CHANGELOG / 评论对话）
+
+可通过 `evn/.aicr/config.toml` 覆盖（模板见 `evn/.aicr/config.toml.example`）；环境变量优先于 TOML 中未设置的项。
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `AICR_CONFIG_PATH` | （自动探测 `evn/.aicr/config.toml`） | 显式指定部署配置路径 |
+| `AICR_DESCRIBE_ENABLED` | `1` | 启用 `POST /describe` |
+| `AICR_DESCRIBE_UPDATE_MR` | `0` | `1` 时写回 MR 标题/描述 |
+| `AICR_CHANGELOG_ENABLED` | `1` | 启用 `POST /changelog` |
+| `AICR_ASK_ENABLED` | `1` | 启用 MR Note 对话（Webhook） |
+| `AICR_ASK_TRIGGERS` | `@aicr,/ask` | 触发词（逗号分隔） |
+| `AICR_BOT_USERNAME` | `aicr-bot` | 识别 Bot 评论，避免自回复 |
+| `AICR_WEBHOOK_NOTE_ENABLED` | `1` | Webhook 处理 Note 事件 |
+| `AICR_SUPPRESS_REVIEW_AFTER_DESCRIBE` | `1` | describe 后短时抑制重复 review |
+| `AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS` | `120` | 抑制窗口（秒） |
+| `LLM_MODEL_DESCRIBE` 等 | — | 可选：按工具覆盖 LLM（见 `config.toml` `[llm.*]`） |
+
 CI 组合 **reviewdog + AICR** 见 [CI_REVIEW_PIPELINE.md](./CI_REVIEW_PIPELINE.md)。
 
 ## Webhook 调试

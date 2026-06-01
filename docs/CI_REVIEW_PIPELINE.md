@@ -71,8 +71,11 @@ POST /review
 }
 ```
 
+**阶段 C** 详见 [PHASE_C.md](PHASE_C.md)。
+
 ## 相关文档
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
+- [PHASE_C.md](./PHASE_C.md) — 阶段 C API 与 config.toml
 - [TESTING.md](./TESTING.md)
 - [SECRETS.md](./SECRETS.md)

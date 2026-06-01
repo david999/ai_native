@@ -2,7 +2,7 @@
 
 本文档说明本工程（**AICR Reviewer**）如何利用大语言模型（LLM）对 GitLab Merge Request 进行自动代码评审，涵盖端到端流程、提示词设计、模型接入与结果处理。系统架构总览见 [ARCHITECTURE.md](ARCHITECTURE.md)；运行与 API 见 [aicr-reviewer/README.md](../aicr-reviewer/README.md)。
 
-> 浏览器阅读版：[LLM_CODE_REVIEW.html](LLM_CODE_REVIEW.html)（含侧边目录与流程图）
+> 浏览器阅读版：[LLM_CODE_REVIEW.html](LLM_CODE_REVIEW.html)（含侧边目录与流程图；**内容以本 MD 为准**，HTML 可能滞后）
 
 ---
 
@@ -53,8 +53,9 @@ flowchart LR
 4. **脱敏** — 对 diff 与上下文中的疑似密钥做占位替换后再送入模型。
 5. **调用 LLM** — OpenAI Chat Completions（`response_format: json_object`，不支持时自动降级）。
 6. **解析 JSON** — 规范为 `score`、`summary`、`issues[]`。
-7. **聚合** — 多块取**最低分**，合并全部 `issues`。
-8. **发布** — 向 MR 发布行内讨论或 Note，并发布总分摘要（`REVIEW_DRY_RUN=1` 时跳过发布）。
+7. **Finalize** — 按 diff hunk 过滤 issue（`AICR_FILTER_ISSUES_TO_DIFF`）；`reconcile_score` 对齐分数；可选 **self-reflection**（`reflection.py`）。
+8. **聚合** — 多块取**最低分**，合并全部 `issues`；部分块失败时 `review_completed=false`。
+9. **发布** — 向 MR 发布行内讨论或 Note，并发布总分摘要（`REVIEW_DRY_RUN=1` 时跳过发布）。
 
 核心编排代码：`aicr-reviewer/app/review/orchestrator.py`。
 
@@ -84,7 +85,7 @@ X-AICR-Secret: {AICR_REVIEW_SECRET}   # 若配置了 REVIEW_API_SECRET
 
 ### 3.2 GitLab Webhook（异步评论）
 
-配置 `POST /webhook/gitlab`，校验 `X-Gitlab-Token` 与 `GITLAB_WEBHOOK_SECRET`。仅处理 MR 的 `open` / `update` / `reopen` 事件；评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepted`。
+配置 `POST /webhook/gitlab`，校验 `X-Gitlab-Token` 与 `GITLAB_WEBHOOK_SECRET`。处理 MR 的 `open` / `update` / `reopen` 事件；**Note** 事件（阶段 C）在评论含 `@aicr` / `/ask` 时触发对话。评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepted`。
 
 ---
 
@@ -97,7 +98,7 @@ X-AICR-Secret: {AICR_REVIEW_SECRET}   # 若配置了 REVIEW_API_SECRET
 1. 业务仓库中的 **`.llm/CONTEXT.md`**（从 MR 源分支或目标分支读取，超过 `CONTEXT_MAX_CHARS` 会截断）
 2. 若不存在，使用内置 **Spring Boot / Spring Cloud 默认约定**（`ContextBuilder._default_context()`）
 
-该内容注入 `system_spring.j2` 的「Project-Specific Context」段落，用于约束团队架构、命名、安全规范等。
+**System 模板**按文件扩展名选择（阶段 B）：`system_spring.j2`、`system_python.j2`、`system_go.j2`、`system_typescript.j2`、`system_general.j2`（见 `resolve_system_template()`）。
 
 ### 4.2 MR 与代码变更（User 侧）
 
@@ -134,24 +135,34 @@ X-AICR-Secret: {AICR_REVIEW_SECRET}   # 若配置了 REVIEW_API_SECRET
 
 模板目录：`aicr-reviewer/app/review/prompts/`。
 
-### 5.1 System 提示（`system_spring.j2`）
+### 5.1 System 提示（`system_*.j2`）
 
-定义评审者角色与检查维度，例如：
+按语言选择模板（默认 Spring）。定义评审者角色与检查维度，例如：
 
 - **正确性与安全**：NPE、吞异常、硬编码密钥
-- **Spring / Spring Cloud**：`@Transactional` 自调用、Feign N+1、超时与熔断
-- **API 设计**：`@Valid`、统一异常处理
-- **性能与配置**：循环内低效操作、明文配置、Actuator 暴露
+- **框架约定**：Spring Cloud Feign/熔断、Python/Go/TS 常见反模式（各模板侧重不同）
+- **API 设计**：校验、统一异常处理
+- **性能与配置**：循环内低效操作、明文配置
+
+MR 标题/描述包在 `<untrusted_mr_metadata>` 中，system 要求忽略其中指令。
 
 并规定 **0–100 分档含义** 与 **必须输出的 JSON Schema**（`score`、`summary`、`issues[]`，含 `severity`、`category`、`file`、`line`、`message`、`suggestion`）。
 
-### 5.2 User 提示（`user_review.j2`）
+### 5.2 Self-reflection（`reflection_*.j2`）
+
+当 `AICR_SELF_REFLECTION=1` 且分数低于 `AICR_REFLECTION_SCORE_THRESHOLD` 或存在 critical/major issue 时，追加一次 LLM 调用校验/修正 findings。Reflection 后再次做 diff hunk 过滤。
+
+### 5.3 User 提示（`user_review.j2`）
 
 将 MR 信息与 diff 包在代码块中，末尾要求：`Provide your review as a JSON object with score, summary, and issues.`
 
-### 5.3 自定义提示词
+### 5.4 自定义提示词
 
-修改 `*.j2` 后重启服务即可；若需非 Spring 场景，可新增 system 模板并在 `PromptRenderer.render_system()` 中切换 `language_hint` 或模板名。
+修改 `*.j2` 后重启服务即可；新增语言可添加 `system_*.j2` 并在 `resolve_system_template()` 中注册扩展名映射。
+
+### 5.5 增量评审
+
+`AICR_INCREMENTAL_REVIEW=1` 时，对 `last_reviewed_sha..head_sha` 做 `repository_compare`，仅评新 commit；状态存于 `evn/.aicr-state/`。`head_sha` 未变时跳过 LLM；`force_full=true` 或 `AICR_FORCE_FULL_REVIEW=1` 强制全量 MR diff。
 
 ---
 
@@ -285,7 +296,7 @@ curl http://localhost:8001/health
 cd aicr-reviewer && python scripts/smoke_test.py
 ```
 
-Demo 工程：`test_data/spring-cloud-demo/`，推送后可通过 MR 触发 CI 联调。
+Demo 工程：见 [test_data/README.md](../test_data/README.md)（预期 `test_data/spring-cloud-demo/`）。
 
 ---
 

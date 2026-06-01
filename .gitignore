@@ -21,6 +21,7 @@ evn/gitlab-runner/
 # AICR 增量评审状态（运行时）
 evn/.aicr-state/
 evn/.aicr/config.toml
+!evn/.aicr/config.toml.example
 
 # 兜底：evn 下所有日志与临时文件
 evn/**/*.log

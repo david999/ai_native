@@ -48,7 +48,7 @@ docker compose -f docker-compose.yml \
 
 ## Demo 工程
 
-`test_data/spring-cloud-demo/` — 推送到 GitLab 后 MR 触发 CI review。
+见 [test_data/README.md](../test_data/README.md)。预期路径 `test_data/spring-cloud-demo/`（独立 Git）；目录可能为空，克隆 Demo 后推送到 GitLab 即可 MR 联调。
 
 ## API
 
@@ -93,3 +93,4 @@ aicr-review:
 | 无可审文件 | 200，`review_completed=false` | 通过 |
 | 评审完成且低分 | 200，`review_completed=true`，低分 | **失败** |
 | 评审完成且达标 | 200，`review_completed=true`，高分 | 通过 |
+| 未配置 `REVIEW_API_SECRET` 且未开 `REVIEW_API_ALLOW_INSECURE` | **503** | 通过（脚本视为 fail-open） |
