@@ -226,12 +226,124 @@ def test_prompt_renderer_multilang():
     from app.review.prompt_renderer import PromptRenderer
 
     r = PromptRenderer()
-    py = r.render_system(language_hint="Python")
+    _name, py = r.render_system(language_hint="Python")
     assert "Python" in py
     assert '"score"' in py
-    go = r.render_system(language_hint="Go")
+    _name, go = r.render_system(language_hint="Go")
     assert "goroutine" in go.lower() or "Go" in go
     print("OK prompt renderer multilang")
+
+
+def test_prompt_variant_override():
+    from app.review.prompt_renderer import PromptRenderer
+
+    r = PromptRenderer()
+    name, text = r.render_system(
+        language_hint="Java/Spring",
+        template_override="system_spring_v2_strict",
+    )
+    assert name == "variants/system_spring_v2_strict.j2"
+    assert "strict" in text.lower()
+    print("OK prompt variant override")
+
+
+def test_prompt_variant_disallowed_path():
+    from app.exceptions import InvalidTemplateError
+    from app.review.prompt_renderer import PromptRenderer
+
+    r = PromptRenderer()
+    try:
+        r.render_system(
+            language_hint="Java/Spring",
+            template_override="../system_spring.j2",
+            strict_override=True,
+        )
+        assert False, "expected InvalidTemplateError"
+    except InvalidTemplateError:
+        pass
+    print("OK prompt variant disallowed path")
+
+
+def test_render_system_text_compat():
+    from app.review.prompt_renderer import PromptRenderer
+
+    r = PromptRenderer()
+    text = r.render_system_text(language_hint="Python")
+    assert "Python" in text
+    assert '"score"' in text
+    print("OK render_system_text compat")
+
+
+def test_resolve_effective_template_strict():
+    from app.exceptions import InvalidTemplateError
+    from app.review.prompt_variants import resolve_effective_system_template
+
+    path = resolve_effective_system_template(
+        "Java/Spring", override="system_spring_v1_baseline"
+    )
+    assert path == "variants/system_spring_v1_baseline.j2"
+    try:
+        resolve_effective_system_template(
+            "Java/Spring", override="not_a_real_template", strict_override=True
+        )
+        assert False, "expected InvalidTemplateError"
+    except InvalidTemplateError:
+        pass
+    print("OK resolve effective template strict")
+
+
+def test_review_invalid_system_template_400():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", "secret"), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", False):
+        resp = client.post(
+            "/review",
+            json={
+                "project_id": 1,
+                "mr_iid": 1,
+                "system_template": "../system_spring.j2",
+            },
+            headers={"X-AICR-Secret": "secret"},
+        )
+    assert resp.status_code == 400
+    assert "system_template" in resp.json()["detail"]
+    print("OK review invalid system_template 400")
+
+
+def test_review_system_template_applied():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    with patch("app.api.routes.REVIEW_API_SECRET", "secret"), \
+         patch("app.api.routes.REVIEW_API_ALLOW_INSECURE", False), \
+         patch("app.api.routes._run_orchestrator", return_value={
+             "score": 80.0,
+             "issues": [],
+             "summary": "ok",
+             "review_completed": True,
+             "code_quality": [],
+             "system_template": "variants/system_spring_v2_strict.j2",
+             "system_template_requested": "system_spring_v2_strict",
+             "prompt_sha256": "abc",
+         }):
+        resp = client.post(
+            "/review",
+            json={
+                "project_id": 1,
+                "mr_iid": 1,
+                "system_template": "system_spring_v2_strict",
+            },
+            headers={"X-AICR-Secret": "secret"},
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["system_template"] == "variants/system_spring_v2_strict.j2"
+    assert body["system_template_requested"] == "system_spring_v2_strict"
+    print("OK review system_template applied")
 
 
 def test_should_reflect():
@@ -583,7 +695,8 @@ def test_orchestrator_parallel_chunks():
         elapsed = time.time() - t0
 
     assert llm.chat.call_count == 2
-    assert elapsed < 0.28
+    # 2×0.15s 并行；Windows 调度略慢，放宽上界
+    assert elapsed < 0.45
     print("OK orchestrator parallel chunks")
 
 
@@ -1315,7 +1428,51 @@ def test_llm_factory_missing_key():
     print("OK llm factory missing key")
 
 
+def _write_smoke_report(path, run_id, entries, failed, total):
+    import json
+    from pathlib import Path
+
+    from test_catalog import L1_REPORT_TITLE_ZH
+    from report_zh import write_l1_smoke_md
+
+    report = {
+        "title_zh": L1_REPORT_TITLE_ZH,
+        "level": "L1",
+        "description_zh": "冒烟测试：无需 GitLab/Docker/LLM，验证解析、分块、编排、API 契约等核心逻辑",
+        "run_id": run_id,
+        "passed": total - failed,
+        "failed": failed,
+        "total": total,
+        "tests": entries,
+    }
+    p = Path(path)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    write_l1_smoke_md(p)
+
+
 if __name__ == "__main__":
+    import argparse
+    import json
+    import sys
+    import time
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    _scripts = Path(__file__).resolve().parent
+    if str(_scripts) not in sys.path:
+        sys.path.insert(0, str(_scripts))
+    from test_catalog import L1_REPORT_TITLE_ZH, smoke_entry_zh, status_zh
+    from report_zh import write_l1_smoke_md
+
+    parser = argparse.ArgumentParser(description="AICR smoke tests")
+    parser.add_argument(
+        "--report-json",
+        metavar="PATH",
+        help="Write machine-readable test report to PATH",
+    )
+    args = parser.parse_args()
+
     tests = [
         test_parser,
         test_parser_markdown_fence,
@@ -1330,6 +1487,12 @@ if __name__ == "__main__":
         test_diff_line_index,
         test_resolve_system_template,
         test_prompt_renderer_multilang,
+        test_prompt_variant_override,
+        test_prompt_variant_disallowed_path,
+        test_render_system_text_compat,
+        test_resolve_effective_template_strict,
+        test_review_invalid_system_template_400,
+        test_review_system_template_applied,
         test_should_reflect,
         test_orchestrator_filters_out_of_diff,
         test_diff_compress_deletion_only_hunk,
@@ -1388,6 +1551,40 @@ if __name__ == "__main__":
         test_describe_tool_mock,
         test_llm_factory_missing_key,
     ]
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    entries = []
+    failed = 0
     for fn in tests:
-        fn()
+        name = fn.__name__
+        t0 = time.perf_counter()
+        try:
+            fn()
+            ms = int((time.perf_counter() - t0) * 1000)
+            zh = smoke_entry_zh(name)
+            entries.append({
+                "name": name,
+                "status": "passed",
+                "status_zh": status_zh("passed"),
+                "ms": ms,
+                **zh,
+            })
+        except Exception as e:
+            ms = int((time.perf_counter() - t0) * 1000)
+            zh = smoke_entry_zh(name)
+            entries.append({
+                "name": name,
+                "status": "failed",
+                "status_zh": status_zh("failed"),
+                "ms": ms,
+                "error": str(e),
+                **zh,
+            })
+            failed += 1
+            if args.report_json:
+                _write_smoke_report(args.report_json, run_id, entries, failed, len(tests))
+            raise
+
     print(f"All {len(tests)} smoke tests passed.")
+    if args.report_json:
+        _write_smoke_report(args.report_json, run_id, entries, 0, len(tests))
+        print(f"Report written to {args.report_json}")

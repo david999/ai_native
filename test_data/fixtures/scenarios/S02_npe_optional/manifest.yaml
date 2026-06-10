@@ -1,0 +1,7 @@
+id: S02_npe_optional
+title: Optional.orElse(null) 未校验
+branch: aicr-test/S02_npe_optional
+commit_message: "test(S02): Optional.orElse(null) without null guard"
+files:
+  - dest: src/main/java/com/example/demo/service/UserService.java
+    source: files/UserService.java

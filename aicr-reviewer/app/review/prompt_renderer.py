@@ -3,7 +3,7 @@
 import os
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from app.review.language_priority import resolve_system_template
+from app.review.prompt_variants import resolve_effective_system_template
 
 _PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
 _env = Environment(
@@ -13,10 +13,40 @@ _env = Environment(
 
 
 class PromptRenderer:
-    def render_system(self, context_md: str = "", language_hint: str = "General") -> str:
-        template_name = resolve_system_template(language_hint)
+    def render_system(
+        self,
+        context_md: str = "",
+        language_hint: str = "General",
+        *,
+        template_override: str | None = None,
+        strict_override: bool = False,
+    ) -> tuple[str, str]:
+        """返回 (template_name, rendered_text)。需要仅文本时请用 render_system_text()。"""
+        template_name = resolve_effective_system_template(
+            language_hint,
+            override=template_override,
+            strict_override=strict_override,
+        )
         template = _env.get_template(template_name)
-        return template.render(context_md=context_md, language_hint=language_hint)
+        text = template.render(context_md=context_md, language_hint=language_hint)
+        return template_name, text
+
+    def render_system_text(
+        self,
+        context_md: str = "",
+        language_hint: str = "General",
+        *,
+        template_override: str | None = None,
+        strict_override: bool = False,
+    ) -> str:
+        """兼容包装：仅返回渲染后的 system 文本。"""
+        _name, text = self.render_system(
+            context_md=context_md,
+            language_hint=language_hint,
+            template_override=template_override,
+            strict_override=strict_override,
+        )
+        return text
 
     def render_user(
         self,

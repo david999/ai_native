@@ -1,0 +1,7 @@
+id: S04_hardcoded_secret
+title: 配置文件明文密钥
+branch: aicr-test/S04_hardcoded_secret
+commit_message: "test(S04): plaintext credentials in application.yml"
+files:
+  - dest: src/main/resources/application-aicr-test.yml
+    source: files/application-aicr-test.yml

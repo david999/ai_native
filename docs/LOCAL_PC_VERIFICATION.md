@@ -62,7 +62,7 @@ notepad evn\.env
 
 ### 2.1 一级验收：冒烟测试（推荐每次改代码后执行）
 
-**不需要** GitLab、Docker、LLM 密钥。验证解析、分块、编排、脱敏、API 契约等 **70** 项逻辑（以 `smoke_test.py` 内 `tests` 列表为准）。
+**不需要** GitLab、Docker、LLM 密钥。验证解析、分块、编排、脱敏、API 契约等 **76** 项逻辑（以 `smoke_test.py` 内 `tests` 列表为准）。
 
 #### Linux / macOS / Git Bash
 
@@ -87,7 +87,7 @@ python scripts\smoke_test.py
 **通过标准**：最后一行类似：
 
 ```text
-All 70 smoke tests passed.
+All 76 smoke tests passed.
 ```
 
 任一步断言失败会打印堆栈并退出，非零退出码。
@@ -146,7 +146,7 @@ PowerShell 等价：
 
 | 步骤 | 操作 | 通过标准 |
 |------|------|----------|
-| 1 | `python scripts/smoke_test.py` | `All 70 smoke tests passed.` |
+| 1 | `python scripts/smoke_test.py` | `All 76 smoke tests passed.` |
 | 2 | （可选）`compileall` | 无错误输出 |
 
 **结论**：核心 Python 模块与 HTTP 契约符合设计；**不保证** GitLab/LLM 外网可用。
@@ -168,21 +168,34 @@ PowerShell 等价：
 
 ---
 
-### L3 — 全链路 E2E（GitLab + LLM + MR/CI）
+### 日常验收（L1+L2，推荐 / Agent 默认）
 
-需要：**Docker**、足够磁盘与内存、有效 **LLM API**、GitLab **Bot Token**。
+**不需要** GitLab、Docker、LLM。中文报告自动落盘：
 
-#### 3.1 启动 GitLab（Docker）
-
-```bash
-docker network create gitlab_default 2>/dev/null || true
-cd <repo>/evn/gitlab
-docker compose -f docker-compose.yml up -d
+```powershell
+cd <repo>\aicr-reviewer
+.\scripts\run_acceptance.ps1 -Level daily
+.\.venv\Scripts\python.exe scripts\show_latest_report.py
 ```
 
-等待 GitLab 就绪（首次可能 10+ 分钟），浏览器访问：`http://localhost:8000`。
+产出：`test-results/<时间戳>/l1-smoke.md`、`l2-health.md`、`summary.zh.md`。
 
-按 `evn/gitlab` 目录内说明或项目文档创建 Bot 用户、PAT，写入 `evn/.env` 的 `AICR_BOT_TOKEN`，`GITLAB_URL=http://localhost:8000`。
+### L3 — 全链路 E2E（本地 GitLab + LLM + MR）
+
+需要：本机 **GitLab 服务已手动启动**（**不依赖 Docker**）、`test_data/spring-cloud-demo`、**LLM API**、**Bot Token**。AICR 用 **`run_local.ps1`**。
+
+```powershell
+.\scripts\run_acceptance.ps1 -Level L3 -Scenario S02_npe_optional
+```
+
+#### 3.1 启动 GitLab（本机服务）
+
+请使用你当前的 GitLab 安装/服务方式，确保 `http://localhost:8000` 可访问。  
+L3 验收脚本 `test_data/scripts/ensure_gitlab.ps1` 会探测 `GITLAB_URL`；不可达且本机有 Docker 时自动 `docker compose up`（见 [ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md)）。
+
+`evn/gitlab/docker-compose.yml` 仅作**可选**容器化部署参考（生产环境待定）。
+
+Bot PAT 写入 `evn/.env` 的 `AICR_BOT_TOKEN`，`GITLAB_URL=http://localhost:8000`。
 
 #### 3.2 启动 AICR Reviewer
 
@@ -212,8 +225,16 @@ docker compose -f docker-compose.yml \
 2. 创建 **Merge Request**（含 `.java` 等可评审文件变更）。
 3. 在业务仓库 CI 中配置 `aicr-reviewer/ci/gitlab-ci.snippet.yml` 同类 job，或手工调用：
 
+Runner 与 AICR 同在宿主机时：
+
 ```bash
 export AICR_REVIEW_URL=http://localhost:8001
+```
+
+仅当 Runner 运行在容器内时，改用 `http://host.docker.internal:8001`（Windows）。
+
+```bash
+# export AICR_REVIEW_URL=http://host.docker.internal:8001
 export AICR_REVIEW_SECRET=<与 evn/.env 中 REVIEW_API_SECRET 一致>
 export CI_PROJECT_ID=<项目 ID>
 export CI_MERGE_REQUEST_IID=<MR IID>
@@ -250,7 +271,7 @@ curl -s -X POST http://localhost:8001/webhook/gitlab \
 
 ### 必做（L1）
 
-- [ ] `cd aicr-reviewer && python scripts/smoke_test.py` → 70 项全部通过
+- [ ] `cd aicr-reviewer && python scripts/smoke_test.py` → 76 项全部通过
 - [ ] （可选）`compileall` 无报错
 
 ### 推荐（L2）

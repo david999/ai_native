@@ -19,6 +19,12 @@
 └── test_data/              # Demo 工程（见 test_data/README.md，可选）
 ```
 
+## 回归阅读顺序
+
+1. [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) — 工程全景与重点关注
+2. [docs/LOCAL_PC_VERIFICATION.md](docs/LOCAL_PC_VERIFICATION.md) — L1–L3 分层验收
+3. [docs/ACCEPTANCE_TESTING.md](docs/ACCEPTANCE_TESTING.md) — 一键验收与多模板对比
+
 ## 快速开始
 
 1. 复制环境变量：`cp evn/.env.example evn/.env`，按 [docs/SECRETS.md](docs/SECRETS.md) 填写密钥。
@@ -30,6 +36,8 @@
 
 | 文档 | 说明 |
 |------|------|
+| [docs/PROJECT_OVERVIEW.md](docs/PROJECT_OVERVIEW.md) | **工程全景**（回归首选） |
+| [docs/ACCEPTANCE_TESTING.md](docs/ACCEPTANCE_TESTING.md) | 一键验收、fixtures、结果落盘 |
 | [docs/README.md](docs/README.md) | **文档地图**、代码↔文档映射表 |
 | [evn/README.md](evn/README.md) | 环境目录、Compose 启动、gitignore 边界 |
 | [test_data/README.md](test_data/README.md) | Demo 独立 Git、CI 集成 |
@@ -38,7 +46,7 @@
 | [docs/CI_REVIEW_PIPELINE.md](docs/CI_REVIEW_PIPELINE.md) | **CI 流水线**：reviewdog + AICR、增量评审与阶段 A 配置 |
 | [aicr-reviewer/README.md](aicr-reviewer/README.md) | 运行方式、API、失败策略 |
 | [docs/LLM_CODE_REVIEW.md](docs/LLM_CODE_REVIEW.md) | **大模型如何实现代码评审**（流程、提示词、接入与门禁） |
-| [docs/LLM_CODE_REVIEW.html](docs/LLM_CODE_REVIEW.html) | 同上（HTML 阅读版，含目录导航） |
+| [docs/PROMPT_TEMPLATES.md](docs/PROMPT_TEMPLATES.md) | 多版本提示词模板与对比测试 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构与评审流水线 |
 | [docs/CODE_REFERENCE.md](docs/CODE_REFERENCE.md) | **源码级详细说明**（模块、分支、数据结构） |
 | [docs/GITHUB_REFERENCES.md](docs/GITHUB_REFERENCES.md) | **外部开源参考**（pr-agent / ai-pr-reviewer / reviewdog 与阶段 A/B/C 落点） |

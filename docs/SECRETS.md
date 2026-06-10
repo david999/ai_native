@@ -51,6 +51,7 @@
 | `AICR_FILTER_ISSUES_TO_DIFF` | `1` | `0` 关闭「仅 diff hunk 内 issue」过滤 |
 | `AICR_SELF_REFLECTION` | `1` | `0` 关闭二次 reflection LLM 调用 |
 | `AICR_REFLECTION_SCORE_THRESHOLD` | 同 `AICR_SCORE_THRESHOLD` | 低于该分或存在 critical/major 时触发 reflection |
+| `AICR_SYSTEM_TEMPLATE` | （空） | 强制 `prompts/variants/*.j2` 或标准 `system_*.j2`；空则按语言自动选择 |
 
 ## 阶段 C（describe / CHANGELOG / 评论对话）
 

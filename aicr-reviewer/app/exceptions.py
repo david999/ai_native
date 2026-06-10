@@ -17,3 +17,7 @@ class LLMReviewError(ReviewError):
 
 class NoReviewableChangesError(ReviewError):
     """MR has no supported file changes to review."""
+
+
+class InvalidTemplateError(ReviewError):
+    """Requested system_template is not in the allowlist."""

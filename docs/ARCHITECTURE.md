@@ -61,7 +61,7 @@ flowchart TB
    - 单文件过大时截断 diff 并丢弃全文内容。
 
 3. **调用 LLM**（每块一次）
-   - Jinja2 模板渲染 system/user 提示词。
+   - Jinja2 模板渲染 system/user 提示词；`prompt_variants.py` 对白名单模板做路径校验，请求体显式 `system_template` 非法时 API 返回 400。
    - 发送前经 `redact_secrets` 脱敏。
    - 期望 JSON：`score`、`summary`、`issues[]`。
 
@@ -94,6 +94,7 @@ flowchart TB
 | `app/review/diff_line_index.py` | 解析 diff hunk，过滤行内评论行号 |
 | `app/review/reflection.py` | Self-reflection 二次校验 |
 | `app/review/score_utils.py` | 过滤后分数 reconcile |
+| `app/review/prompt_variants.py` | variants 白名单与 `AICR_SYSTEM_TEMPLATE` 解析 |
 | `app/review/prompts/system_*.j2` | 多语言 system 模板 |
 | `app/gitlab/publisher.py` | 评论与摘要发布 |
 | `app/llm/factory.py` | 按 `LLM_PROVIDER` 创建客户端 |

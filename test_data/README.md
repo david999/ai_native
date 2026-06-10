@@ -1,52 +1,58 @@
 # Demo / 联调工程（test_data）
 
-本目录用于放置 **独立的 Git 业务仓库**，与 monorepo（`E:\ai_native`）分离版本管理，用于 GitLab MR + CI 全链路联调。
+本目录用于 **独立的 Git 业务仓库**与**固定验收场景**，与 monorepo 分离版本管理。
 
-## 预期布局
+## 布局
 
 ```
 test_data/
-└── spring-cloud-demo/     # 示例 Spring Cloud 工程（自有 .git）
-    ├── .gitlab-ci.yml
-    ├── .llm/CONTEXT.md
-    └── scripts/
-        └── run_review.py  # 可选；推荐改用 ci_review_gate.sh
+├── spring-cloud-demo/          # 业务仓（自有 .git，clone 自本地 GitLab）
+├── fixtures/scenarios/         # 固定测试场景（纳入 monorepo）
+│   ├── manifest.yaml
+│   ├── S01_clean_refactor/
+│   └── ...
+└── scripts/                    # 场景应用、MR、触发评审
+    ├── apply_scenario.py
+    ├── bootstrap_demo.ps1
+    ├── ensure_gitlab.ps1
+    └── ...
 ```
 
-当前目录可能为空：将 Demo 克隆或复制到此处即可，**不要求**纳入本 monorepo 的 Git 历史（根 `.gitignore` 已忽略 `test_data/**/.git/`）。
+`spring-cloud-demo` 的 **remote 应指向本地 GitLab**（`http://localhost:8000/...`）。根 `.gitignore` 忽略 `test_data/**/.git/`。
 
 ## 获取 Demo
-
-若已有远程 GitLab 仓库：
 
 ```bash
 cd test_data
 git clone http://localhost:8000/java_group/spring-cloud-demo.git
 ```
 
-或从其他路径复制现有工程到 `test_data/spring-cloud-demo/`。
+需先启动 `evn/gitlab`（`docker compose up -d`）。
 
-## CI 集成（推荐）
+## 固定测试场景
 
-在业务仓库 `.gitlab-ci.yml` 中引用 AICR 门禁脚本，示例见：
+场景定义在 `fixtures/scenarios/`；**每次验收应用相同 patch**，不随机生成代码。详见 [docs/ACCEPTANCE_TESTING.md](../docs/ACCEPTANCE_TESTING.md)。
+
+```powershell
+cd E:\ai_native\aicr-reviewer
+.\.venv\Scripts\python.exe ..\test_data\scripts\apply_scenario.py --scenario S02_npe_optional
+```
+
+基线分支：`aicr-test-base`（由 `bootstrap_demo.ps1` 创建）。
+
+## CI 集成
+
+业务仓库 `.gitlab-ci.yml` 引用：
 
 - [`aicr-reviewer/ci/gitlab-ci.snippet.yml`](../aicr-reviewer/ci/gitlab-ci.snippet.yml)
 - [docs/CI_REVIEW_PIPELINE.md](../docs/CI_REVIEW_PIPELINE.md)
 
-核心 job 调用 `aicr-reviewer/scripts/ci_review_gate.sh`，向评审服务 `POST /review`；**仅当** `review_completed=true` 且分数低于阈值时失败 job。
-
-### GitLab CI/CD Variables（业务仓库）
-
-| 变量 | 说明 |
-|------|------|
-| `AICR_REVIEW_URL` | 如 `http://aicr-reviewer:8001`（Runner 网络内） |
+| CI 变量 | 值 |
+|---------|-----|
+| `AICR_REVIEW_URL` | `http://host.docker.internal:8001`（Runner 容器 → 宿主机 AICR） |
 | `AICR_REVIEW_SECRET` | 与 `evn/.env` 中 `REVIEW_API_SECRET` 一致 |
-| `AICR_SCORE_THRESHOLD` | 默认 `60` |
-
-## 项目规范文件
-
-Demo 仓库根目录可放置 **`.llm/CONTEXT.md`**，评审时注入 LLM system prompt（团队架构规范）。
 
 ## 全链路验收
 
-见 [docs/LOCAL_PC_VERIFICATION.md](../docs/LOCAL_PC_VERIFICATION.md) L3 章节。
+- 分层手册：[docs/LOCAL_PC_VERIFICATION.md](../docs/LOCAL_PC_VERIFICATION.md)
+- 一键脚本：[docs/ACCEPTANCE_TESTING.md](../docs/ACCEPTANCE_TESTING.md)

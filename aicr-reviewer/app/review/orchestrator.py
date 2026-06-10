@@ -19,6 +19,7 @@ from app.llm.base import LLMProvider
 from app.review.chunker import DiffChunker
 from app.review.language_priority import infer_language_hint
 from app.review.prompt_renderer import PromptRenderer
+from app.review.prompt_variants import prompt_sha256
 from app.review.parser import StructuredResponseParser, ParseError
 from app.review.review_state import ReviewStateStore
 from app.utils.redact import redact_secrets
@@ -51,8 +52,14 @@ class ReviewOrchestrator:
         extra_diff: str = "",
         *,
         force_full: bool = False,
+        system_template: str = "",
     ) -> Dict[str, Any]:
         logger.info(f"Starting review for project={project_id} MR !{mr_iid}")
+        self._system_template_override = (system_template or "").strip() or None
+        self._strict_template_override = bool(self._system_template_override)
+        self._system_template_requested = self._system_template_override or ""
+        self._last_system_template = ""
+        self._last_prompt_sha256 = ""
 
         gl_session = GitLabMRSession(project_id, mr_iid)
         ctx: MRContext = self.context_builder.build(
@@ -113,6 +120,9 @@ class ReviewOrchestrator:
             "issues": all_issues,
             "code_quality": self._build_code_quality(all_issues),
             "review_completed": review_completed,
+            "system_template": self._last_system_template,
+            "system_template_requested": self._system_template_requested,
+            "prompt_sha256": self._last_prompt_sha256,
         }
 
     def _skipped_result(
@@ -136,6 +146,9 @@ class ReviewOrchestrator:
             "issues": [],
             "code_quality": [],
             "review_completed": publish_ok,
+            "system_template": "",
+            "system_template_requested": getattr(self, "_system_template_requested", ""),
+            "prompt_sha256": "",
         }
 
     def _review_all_chunks(
@@ -336,10 +349,15 @@ class ReviewOrchestrator:
         if chunk.get("deletions_only") and ctx.deleted_files:
             hint_files = [{"new_path": p} for p in ctx.deleted_files] + hint_files
         language_hint = infer_language_hint(hint_files)
-        system_prompt = self.renderer.render_system(
+        template_name, system_prompt = self.renderer.render_system(
             context_md=ctx.context_md,
             language_hint=language_hint,
+            template_override=self._system_template_override,
+            strict_override=self._strict_template_override,
         )
+        if not self._last_system_template:
+            self._last_system_template = template_name
+            self._last_prompt_sha256 = prompt_sha256(system_prompt)
 
         changed_files_summary = self._files_summary(chunk["files"])
         include_deleted = (

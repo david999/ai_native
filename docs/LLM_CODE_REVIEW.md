@@ -305,7 +305,8 @@ Demo 工程：见 [test_data/README.md](../test_data/README.md)（预期 `test_d
 | 模块 | 路径 | 职责 |
 |------|------|------|
 | 流水线编排 | `app/review/orchestrator.py` | 上下文 → 分块 → LLM → 聚合 → 发布 |
-| 提示词渲染 | `app/review/prompt_renderer.py` | Jinja2 加载 `prompts/*.j2` |
+| 提示词渲染 | `app/review/prompt_renderer.py` | Jinja2 加载 `prompts/*.j2`；`render_system_text()` 兼容包装 |
+| 变体白名单 | `app/review/prompt_variants.py` | `manifest.yaml` + `system_*.j2` 校验；`InvalidTemplateError` |
 | System/User 模板 | `app/review/prompts/*.j2` | 评审规则与 MR 输入格式 |
 | Diff 分块 | `app/review/chunker.py` | Token 预算切分 |
 | 响应解析 | `app/review/parser.py` | JSON 提取与规范化 |

@@ -44,4 +44,8 @@ aicr-reviewer/.venv/
 
 # test_data 下各 demo 自带 .git，不纳入本仓库
 test_data/**/.git/
+
+# 验收运行报告（本地落盘）
+test-results/*
+!test-results/.gitkeep
 evn/DockerData/DockerDesktopWSL/disk/docker_data.vhdx

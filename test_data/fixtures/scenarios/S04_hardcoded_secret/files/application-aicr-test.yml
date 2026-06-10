@@ -1,0 +1,7 @@
+aicr:
+  test:
+    datasource:
+      password: SuperSecretPassword123!
+      username: admin
+    api:
+      key: sk-aicr-hardcoded-test-key-abcdef

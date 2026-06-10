@@ -1,0 +1,7 @@
+id: S01_clean_refactor
+title: 纯重构（提取方法、重命名）
+branch: aicr-test/S01_clean_refactor
+commit_message: "test(S01): clean refactor - extract method"
+files:
+  - dest: src/main/java/com/example/demo/service/OrderService.java
+    source: files/OrderService.java

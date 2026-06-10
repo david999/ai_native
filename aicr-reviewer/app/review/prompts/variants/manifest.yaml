@@ -1,0 +1,18 @@
+variants:
+  - id: system_spring_v1_baseline
+    file: variants/system_spring_v1_baseline.j2
+    description: 默认 Spring 评审（与 system_spring.j2 等价）
+    language_hints:
+      - Java/Spring
+
+  - id: system_spring_v2_strict
+    file: variants/system_spring_v2_strict.j2
+    description: 更严评分，强制检查 NPE/空 catch/密钥/Feign 超时
+    language_hints:
+      - Java/Spring
+
+  - id: system_spring_v3_security
+    file: variants/system_spring_v3_security.j2
+    description: 安全侧重（密钥、注入、暴露面）
+    language_hints:
+      - Java/Spring

@@ -37,21 +37,29 @@ Windows PowerShell：
 Copy-Item evn\.env.example evn\.env
 ```
 
-## 启动 GitLab（Linux + Docker）
+## 本地日常（推荐，不依赖 Docker）
+
+```powershell
+cd aicr-reviewer
+.\scripts\run_local.ps1          # AICR → http://localhost:8001
+.\scripts\run_acceptance.ps1 -Level daily   # L1+L2 中文报告
+```
+
+GitLab 使用你本机已安装的服务（`GITLAB_URL=http://localhost:8000`）。**daily** 验收不碰 GitLab；**L3** 时 `test_data/scripts/ensure_gitlab.ps1` 会探测并在有 Docker 时自动 `compose up`。
+
+## 可选：GitLab + AICR（Docker，生产/实验）
+
+以下仅在你**明确采用容器部署**时使用；与本地 `daily` 验收无关。
 
 ```bash
 docker network create gitlab_default   # 若不存在
-
 cd evn/gitlab
 docker compose up -d
 ```
 
 - Web：`http://localhost:8000`
-- SSH clone：`ssh://git@localhost:2222/...`
 
-Volume 使用 **相对路径**（`./data`、`./logs`、`./config`），数据落在 `evn/gitlab/` 下。
-
-## 启动 AICR Reviewer（Docker）
+## 可选：AICR Reviewer（Docker）
 
 ```bash
 cd aicr-reviewer && docker build -t gitlab-aicr-reviewer:latest .

@@ -1,0 +1,7 @@
+id: S05_feign_no_timeout
+title: Feign 客户端缺超时
+branch: aicr-test/S05_feign_no_timeout
+commit_message: "test(S05): Feign client without connect/read timeout"
+files:
+  - dest: src/main/java/com/example/demo/client/InventoryClient.java
+    source: files/InventoryClient.java

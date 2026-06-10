@@ -26,8 +26,14 @@ from app.api.concurrency import (
     ReviewCapacityError,
 )
 from app.review.review_state import ReviewStateStore
-from app.exceptions import LLMReviewError, NoReviewableChangesError, ReviewError
+from app.exceptions import (
+    InvalidTemplateError,
+    LLMReviewError,
+    NoReviewableChangesError,
+    ReviewError,
+)
 from app.review.orchestrator import ReviewOrchestrator
+from app.review.prompt_variants import validate_strict_template_override
 from app.gitlab.context_builder import ContextBuilder
 from app.llm.factory import create_llm_provider
 from app.gitlab.publisher import GitLabPublisher
@@ -47,6 +53,7 @@ class ReviewRequest(BaseModel):
     mr_iid: int
     diff: str = ""
     force_full: bool = False
+    system_template: str = ""
 
 
 class DescribeRequest(BaseModel):
@@ -85,6 +92,9 @@ class ReviewResult(BaseModel):
     summary: str = ""
     # True 表示 LLM 已完成评审；CI 仅在此为 true 且分数低于阈值时才失败
     review_completed: bool = False
+    system_template: str = ""
+    system_template_requested: str = ""
+    prompt_sha256: str = ""
 
 
 def _fail_open_review(reason: str) -> ReviewResult:
@@ -131,6 +141,7 @@ def _run_orchestrator(
     extra_diff: str = "",
     *,
     force_full: bool = False,
+    system_template: str = "",
 ) -> dict:
     if not AICR_BOT_TOKEN:
         raise HTTPException(status_code=500, detail="AICR_BOT_TOKEN is not configured")
@@ -152,6 +163,7 @@ def _run_orchestrator(
         mr_iid=mr_iid,
         extra_diff=extra_diff,
         force_full=force_full,
+        system_template=system_template,
     )
 
 
@@ -247,9 +259,16 @@ def review(req: ReviewRequest, request: Request):
 
     try:
         try:
+            validate_strict_template_override(req.system_template)
             result = _run_orchestrator(
-                req.project_id, req.mr_iid, req.diff, force_full=req.force_full
+                req.project_id,
+                req.mr_iid,
+                req.diff,
+                force_full=req.force_full,
+                system_template=req.system_template,
             )
+        except InvalidTemplateError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
         except NoReviewableChangesError as e:
             logger.info(f"No reviewable changes: {e}")
             return ReviewResult(
@@ -272,6 +291,9 @@ def review(req: ReviewRequest, request: Request):
             code_quality=result.get("code_quality", []),
             summary=result.get("summary", ""),
             review_completed=result.get("review_completed", False),
+            system_template=result.get("system_template", ""),
+            system_template_requested=result.get("system_template_requested", ""),
+            prompt_sha256=result.get("prompt_sha256", ""),
         )
     finally:
         release_mr_review(req.project_id, req.mr_iid)

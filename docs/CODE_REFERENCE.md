@@ -200,6 +200,7 @@ Exception
 | `project_id` | `int` | 必填 | GitLab 项目 ID |
 | `mr_iid` | `int` | 必填 | MR 内部 IID（`!123` 中的 123） |
 | `diff` | `str` | `""` | CI 注入的额外 patch，见 `ContextBuilder.build(extra_diff)` |
+| `system_template` | `str` | `""` | 可选；覆盖 env `AICR_SYSTEM_TEMPLATE`（须在白名单内，见 `prompt_variants.py`） |
 
 **`ReviewResult`**
 
@@ -210,6 +211,9 @@ Exception
 | `code_quality` | `List[Dict]` | `[]` | Code Climate 风格，供工具链 |
 | `summary` | `str` | `""` | 人类可读摘要 |
 | `review_completed` | `bool` | `False` | **CI 门禁唯一可信标志** |
+| `system_template` | `str` | `""` | 实际应用的 system 模板路径 |
+| `system_template_requested` | `str` | `""` | 请求中的 `system_template`（未指定则为空） |
+| `prompt_sha256` | `str` | `""` | 渲染后 system prompt 的 SHA-256 |
 
 常量：`FAIL_OPEN_SCORE = 100.0`。
 
@@ -226,7 +230,9 @@ Exception
 flowchart TD
     Start([POST /review]) --> Auth{_verify_review_auth}
     Auth -->|HTTPException| FO1[_fail_open_review]
-    Auth -->|通过| Run[_run_orchestrator]
+    Auth -->|通过| Tpl{system_template 合法?}
+    Tpl -->|非法| E400[HTTP 400 InvalidTemplateError]
+    Tpl -->|合法/未指定| Run[_run_orchestrator]
     Run -->|NoReviewableChangesError| NR[ReviewResult score=100 completed=false]
     Run -->|HTTPException| FO2[_fail_open_review]
     Run -->|LLMReviewError / ReviewError| FO3[_fail_open_review]

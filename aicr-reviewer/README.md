@@ -34,7 +34,9 @@ cd E:\ai_native\aicr-reviewer
 
 健康检查：`GET http://localhost:8001/health`
 
-冒烟测试：`python scripts/smoke_test.py`（用例矩阵 [docs/TESTING.md](../docs/TESTING.md)；**本地 PC 测试与整体验收** [docs/LOCAL_PC_VERIFICATION.md](../docs/LOCAL_PC_VERIFICATION.md)）
+冒烟测试：`python scripts/smoke_test.py`（用例矩阵 [docs/TESTING.md](../docs/TESTING.md)）
+
+一键验收：`.\scripts\run_acceptance.ps1 -Level all`（[docs/ACCEPTANCE_TESTING.md](../docs/ACCEPTANCE_TESTING.md)）
 
 ## Linux Docker 部署
 
@@ -68,6 +70,11 @@ docker compose -f docker-compose.yml \
 | `score` | 0–100；未实际评审时为占位 100 |
 | `review_completed` | `true` 表示 LLM 已完成评审；**仅此时 CI 才应按分数拦 MR** |
 | `summary` | 摘要；跳过评审时含 `fail-open` |
+| `system_template` | 实际应用的 system 模板路径（如 `variants/system_spring_v2_strict.j2`） |
+| `system_template_requested` | 请求中的 `system_template`（未指定则为空） |
+| `prompt_sha256` | 渲染后 system prompt 的 SHA-256 |
+
+可选请求体字段 `system_template`（须在白名单内，见 `prompts/variants/manifest.yaml`）覆盖 env `AICR_SYSTEM_TEMPLATE`；非法值返回 **400**。`PromptRenderer.render_system_text()` 为仅返回文本的兼容包装。详见 [docs/PROMPT_TEMPLATES.md](../docs/PROMPT_TEMPLATES.md)。
 
 ## GitLab CI 门禁（Runner 侧）
 

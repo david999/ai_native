@@ -1,0 +1,7 @@
+id: S03_empty_catch
+title: 空 catch 吞异常
+branch: aicr-test/S03_empty_catch
+commit_message: "test(S03): empty catch swallows exception"
+files:
+  - dest: src/main/java/com/example/demo/service/PaymentService.java
+    source: files/PaymentService.java

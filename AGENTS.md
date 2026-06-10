@@ -23,6 +23,8 @@
 |------|------|
 | 依赖 | `cd aicr-reviewer && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt` |
 | 冒烟测试 | `cd aicr-reviewer && source .venv/bin/activate && python scripts/smoke_test.py`（覆盖见 `docs/TESTING.md`；本地 PC 验收见 `docs/LOCAL_PC_VERIFICATION.md`） |
+| 日常验收 | `cd aicr-reviewer && .\scripts\run_acceptance.ps1 -Level daily`（L1+L2，中文报告，**无需 Docker**） |
+| 读最新报告 | `python scripts/show_latest_report.py`（见 `docs/ACCEPTANCE_TESTING.md`） |
 | 启动 API | `./scripts/run_local.sh` 或 `python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload`（工作目录为 `aicr-reviewer/`） |
 | 健康检查 | `curl http://localhost:8001/health` |
 
@@ -42,15 +44,11 @@ sudo apt-get install -y python3.12-venv
 
 本仓库**无**根级 Makefile、无 ESLint/Ruff 配置；语法检查可用 `python -m compileall -q aicr-reviewer/app aicr-reviewer/main.py`。
 
-### 可选：GitLab + Docker 全链路 E2E
+### 本地验收（默认不依赖 Docker）
 
-需要 Docker 与外部网络 `gitlab_default`：
-
-1. `docker network create gitlab_default`（若不存在）
-2. `cd evn/gitlab && docker compose -f docker-compose.yml up -d`
-3. 构建并叠加启动 reviewer：见 `aicr-reviewer/README.md` 中 Linux Docker 部署一节
-
-Cloud Agent 默认镜像可能未预装 Docker；仅验证应用逻辑时优先使用冒烟测试 + 本地 uvicorn。
+1. **日常**：`run_acceptance.ps1 -Level daily` → 读 `show_latest_report.py`
+2. **L3**：用户手动启动本机 GitLab 后 `run_acceptance.ps1 -Level L3`
+3. **可选生产 Docker**：见 `evn/gitlab/docker-compose.yml`（部署方式待定，与本地 daily 验收无关）
 
 ### 服务端口
 

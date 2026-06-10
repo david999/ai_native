@@ -37,7 +37,9 @@ pip install -r requirements.txt
 python scripts\smoke_test.py
 ```
 
-成功时最后一行输出：`All 70 smoke tests passed.`（数量以 `smoke_test.py` 内 `tests` 列表为准）。
+成功时最后一行输出：`All 76 smoke tests passed.`（数量以 `smoke_test.py` 内 `tests` 列表为准）。
+
+可选 JSON + 中文 Markdown：`python scripts/smoke_test.py --report-json ../test-results/l1-smoke.json`（同时生成 `l1-smoke.md`）
 
 更完整的本地环境说明、服务启动与 **L1/L2/L3 整体验收** 见 [LOCAL_PC_VERIFICATION.md](./LOCAL_PC_VERIFICATION.md)。端口与 Cloud 开发见 [AGENTS.md](../AGENTS.md)。
 
@@ -78,7 +80,7 @@ python scripts\smoke_test.py
 | `test_reconcile_score_after_filter` | 过滤后分数 reconcile |
 | `test_should_reflect` / `test_should_reflect_all_issues_filtered` | reflection 触发条件 |
 | `test_reflection_includes_diff_text` | reflection prompt 含 diff |
-| `test_resolve_system_template` / `test_prompt_renderer_multilang` | 多语言 system 模板 |
+| `test_resolve_system_template` / `test_prompt_renderer_multilang` / `test_prompt_variant_override` | 多语言 system 模板与 variants 覆盖 |
 | `test_prompt_untrusted_metadata` | MR 元数据防注入边界 |
 | `test_paths_match_strict` / `test_filter_deleted_paths_allowed` | diff 过滤路径匹配 |
 

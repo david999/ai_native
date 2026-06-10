@@ -83,6 +83,9 @@ AICR_FETCH_FULL_FILE_ON_INCREMENTAL = (
 )
 REVIEW_CHUNK_MAX_WORKERS = max(1, int(os.getenv("REVIEW_CHUNK_MAX_WORKERS", "2")))
 
+# 提示词变体：强制指定 variants/*.j2 或标准 system_*.j2（空=按语言自动选择）
+AICR_SYSTEM_TEMPLATE = os.getenv("AICR_SYSTEM_TEMPLATE", "").strip()
+
 # 阶段 B：diff 内过滤、self-reflection、多语言 system 模板
 AICR_FILTER_ISSUES_TO_DIFF = toml_or_env_bool(
     "AICR_FILTER_ISSUES_TO_DIFF",
