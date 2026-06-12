@@ -1185,6 +1185,10 @@ chunk: { files: changed_files[], total_chars: int }
 
 # API 响应（ReviewResult）
 同上 + code_quality[] + review_completed: bool
+     + system_template, system_template_requested, prompt_sha256
+
+# 跳过评审（incremental skip_review）仍返回 system_template / prompt_sha256，
+# 便于 L3 矩阵与报告字段一致；review_completed 表示摘要是否发布成功。
 ```
 
 ---

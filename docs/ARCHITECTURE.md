@@ -114,6 +114,16 @@ flowchart TB
 
 ## HTTP 与失败策略
 
+`POST /review` 成功响应（`ReviewResult`）除 `score` / `issues` / `review_completed` 外，还包含提示词溯源字段（跳过评审、fail-open 时亦尽量填充模板元数据）：
+
+| 字段 | 说明 |
+|------|------|
+| `system_template` | 实际应用的 system 模板路径（相对 `prompts/`） |
+| `system_template_requested` | 请求体中的 `system_template`（未指定则为空） |
+| `prompt_sha256` | 渲染后 system prompt 的 SHA-256 |
+
+显式 `system_template` 不在白名单时返回 **400**（不 fail-open）。详见 [PROMPT_TEMPLATES.md](PROMPT_TEMPLATES.md)。
+
 | 场景 | HTTP | 行为 |
 |------|------|------|
 | 无可审文件（无支持扩展名变更） | 200，`review_completed=false` | Runner 脚本放行 |
@@ -129,11 +139,10 @@ Webhook 评审在 `BackgroundTasks` 中异步执行，HTTP 立即返回 `accepte
 
 ## 配置加载顺序
 
-`app/config.py` 依次尝试（不覆盖已存在变量）：
+`app/env_loader.py` / `app/config.py` 加载顺序：
 
-1. `<repo>/evn/.env`
-2. `<repo>/.env`
-3. `aicr-reviewer/.env`
+1. **操作系统环境变量**（Process / User / Machine）优先，尤其 `LLM_API_KEY`、`LLM_MODEL`
+2. `<repo>/evn/.env` → `<repo>/.env` → `aicr-reviewer/.env` 仅回填缺省（空值不覆盖 OS）
 
 更细的类/函数、控制流分支与数据结构见 [CODE_REFERENCE.md](CODE_REFERENCE.md)。
 

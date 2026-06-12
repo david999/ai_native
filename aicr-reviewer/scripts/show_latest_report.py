@@ -32,6 +32,7 @@ def main() -> int:
 
     for name, title in (
         ("summary.zh.md", "验收摘要"),
+        ("l3.md", "L3 全链路"),
         ("l1-smoke.md", "L1 冒烟"),
         ("l2-health.md", "L2 健康"),
         ("summary.md", "英文摘要"),

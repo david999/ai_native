@@ -1,10 +1,9 @@
 """从 monorepo 环境文件加载配置。
 
-加载顺序（``override=False``，先出现的变量优先）：
+加载顺序：
 
-1. ``<repo>/evn/.env`` — 推荐的生产/本地统一配置
-2. ``<repo>/.env``
-3. ``aicr-reviewer/.env``
+1. **操作系统环境变量**（Process / User / Machine）优先，尤其 ``LLM_API_KEY``、``LLM_MODEL`` 等
+2. ``<repo>/evn/.env`` → ``<repo>/.env`` → ``aicr-reviewer/.env`` 仅回填缺省
 
 所有模块应 ``from app.config import ...`` 读取常量，避免散落 ``os.getenv``。
 """
@@ -12,23 +11,12 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from app.env_loader import apply_monorepo_env
 
 # aicr-reviewer/app/config.py -> parents[2] = 仓库根目录
 _MONOREPO_ROOT = Path(__file__).resolve().parents[2]
 
-
-def _load_env_files() -> None:
-    for path in (
-        _MONOREPO_ROOT / "evn" / ".env",
-        _MONOREPO_ROOT / ".env",
-        Path(__file__).resolve().parents[1] / ".env",
-    ):
-        if path.is_file():
-            load_dotenv(path, override=False)
-
-
-_load_env_files()
+apply_monorepo_env()
 
 from app.config_toml import (  # noqa: E402
     deep_get,

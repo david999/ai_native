@@ -182,18 +182,17 @@ cd <repo>\aicr-reviewer
 
 ### L3 — 全链路 E2E（本地 GitLab + LLM + MR）
 
-需要：本机 **GitLab 服务已手动启动**（**不依赖 Docker**）、`test_data/spring-cloud-demo`、**LLM API**、**Bot Token**。AICR 用 **`run_local.ps1`**。
+需要：本机 **Rancher Desktop** + **`evn/gitlab` compose**、`test_data/spring-cloud-demo`、**LLM API**（OS 环境变量优先）、**Bot Token**。AICR 由验收脚本或 **`run_local.ps1`** 启动。
 
 ```powershell
 .\scripts\run_acceptance.ps1 -Level L3 -Scenario S02_npe_optional
 ```
 
-#### 3.1 启动 GitLab（本机服务）
+#### 3.1 启动 GitLab（Rancher Desktop + compose）
 
-请使用你当前的 GitLab 安装/服务方式，确保 `http://localhost:8000` 可访问。  
-L3 验收脚本 `test_data/scripts/ensure_gitlab.ps1` 会探测 `GITLAB_URL`；不可达且本机有 Docker 时自动 `docker compose up`（见 [ACCEPTANCE_TESTING.md](ACCEPTANCE_TESTING.md)）。
+L3 时 `run_acceptance.ps1` 自动：`ensure_rancher.ps1` → `evn/gitlab/start.ps1`。说明见 [`evn/gitlab/README.md`](../evn/gitlab/README.md)。
 
-`evn/gitlab/docker-compose.yml` 仅作**可选**容器化部署参考（生产环境待定）。
+**不用 Docker Desktop**；使用 Rancher 的 `docker` CLI + 现有 `data/config/logs` 卷。
 
 Bot PAT 写入 `evn/.env` 的 `AICR_BOT_TOKEN`，`GITLAB_URL=http://localhost:8000`。
 
@@ -282,7 +281,8 @@ curl -s -X POST http://localhost:8001/webhook/gitlab \
 
 ### 发版 / 联调（L3）
 
-- [ ] GitLab CE（Docker）可访问 `http://localhost:8000`
+- [ ] Rancher Desktop 已安装；L3 脚本可自动启动引擎
+- [ ] GitLab CE 可访问 `http://localhost:8000`（compose + 现有数据卷）
 - [ ] `AICR_BOT_TOKEN`、`LLM_API_KEY`、`LLM_MODEL` 有效
 - [ ] 真实 MR 触发评审，`review_completed=true` 时分数合理
 - [ ] `ci_review_gate.sh` 在低分且已完成评审时拦 MR，在 fail-open 场景放行

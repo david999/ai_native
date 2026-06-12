@@ -37,7 +37,7 @@ Windows PowerShell：
 Copy-Item evn\.env.example evn\.env
 ```
 
-## 本地日常（推荐，不依赖 Docker）
+## 本地日常（推荐，不依赖 Docker Desktop）
 
 ```powershell
 cd aicr-reviewer
@@ -45,7 +45,7 @@ cd aicr-reviewer
 .\scripts\run_acceptance.ps1 -Level daily   # L1+L2 中文报告
 ```
 
-GitLab 使用你本机已安装的服务（`GITLAB_URL=http://localhost:8000`）。**daily** 验收不碰 GitLab；**L3** 时 `test_data/scripts/ensure_gitlab.ps1` 会探测并在有 Docker 时自动 `compose up`。
+GitLab 通过 **Rancher Desktop** + [`gitlab/docker-compose.yml`](gitlab/docker-compose.yml) 启动（**非 Docker Desktop**）。**daily** 不碰 GitLab；**L3** 脚本自动 `ensure_rancher` → [`gitlab/start.ps1`](gitlab/start.ps1)。详见 [`gitlab/README.md`](gitlab/README.md)。
 
 ## 可选：GitLab + AICR（Docker，生产/实验）
 

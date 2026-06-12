@@ -162,7 +162,7 @@ MR 标题/描述包在 `<untrusted_mr_metadata>` 中，system 要求忽略其中
 
 ### 5.5 增量评审
 
-`AICR_INCREMENTAL_REVIEW=1` 时，对 `last_reviewed_sha..head_sha` 做 `repository_compare`，仅评新 commit；状态存于 `evn/.aicr-state/`。`head_sha` 未变时跳过 LLM；`force_full=true` 或 `AICR_FORCE_FULL_REVIEW=1` 强制全量 MR diff。
+`AICR_INCREMENTAL_REVIEW=1` 时，对 `last_reviewed_sha..head_sha` 做 `repository_compare`，仅评新 commit；状态存于 `evn/.aicr-state/`。`head_sha` 未变时跳过 LLM；`force_full=true` 或 `AICR_FORCE_FULL_REVIEW=1` 强制全量 MR diff。跳过时仍解析并返回 `system_template`、`system_template_requested`、`prompt_sha256`，便于 L3 矩阵与 API 字段一致。
 
 ---
 

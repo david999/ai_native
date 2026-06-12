@@ -15,15 +15,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_dotenv() -> None:
-    env_path = REPO_ROOT / "evn" / ".env"
-    if not env_path.is_file():
-        return
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, _, v = line.partition("=")
-        os.environ.setdefault(k.strip(), v.strip())
+    aicr = REPO_ROOT / "aicr-reviewer"
+    if str(aicr) not in sys.path:
+        sys.path.insert(0, str(aicr))
+    from app.env_loader import apply_monorepo_env
+
+    apply_monorepo_env()
 
 
 def api_request(method: str, url: str, token: str, data: dict | None = None) -> dict | list:

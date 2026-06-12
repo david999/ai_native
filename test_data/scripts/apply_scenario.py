@@ -111,7 +111,13 @@ def apply_one(scenario_id: str, *, push: bool, target_branch: str | None) -> dic
     if push:
         run(["git", "push", "-f", "origin", branch], DEMO_DIR)
 
-    return {"scenario_id": scenario_id, "branch": branch, "commit_sha": sha, "pushed": push}
+    return {
+        "scenario_id": scenario_id,
+        "branch": branch,
+        "commit_sha": sha,
+        "pushed": push,
+        "files": [item["dest"] for item in scen.get("files", [])],
+    }
 
 
 def main() -> int:

@@ -617,16 +617,22 @@ def test_orchestrator_skip_unchanged_sha():
     ctx.project_id = 1
     ctx.mr_iid = 7
     ctx.head_sha = "deadbeef"
+    ctx.changed_files = []
+    ctx.deleted_files = []
+    ctx.context_md = ""
 
     orch = ReviewOrchestrator(MagicMock(), MagicMock(), MagicMock())
     orch.context_builder.build = MagicMock(return_value=ctx)
     orch.publisher.publish_summary = MagicMock(return_value=True)
 
     with patch("app.review.orchestrator.REVIEW_DRY_RUN", False):
-        result = orch.run(1, 7)
+        result = orch.run(1, 7, system_template="system_spring_v1_baseline")
 
     assert result["review_completed"] is True
     assert result["score"] == 100.0
+    assert result["system_template"] == "variants/system_spring_v1_baseline.j2"
+    assert result["system_template_requested"] == "system_spring_v1_baseline"
+    assert len(result["prompt_sha256"]) == 64
     orch.publisher.publish_summary.assert_called_once()
     print("OK orchestrator skip unchanged sha")
 
@@ -690,13 +696,15 @@ def test_orchestrator_parallel_chunks():
     with patch("app.review.orchestrator.REVIEW_DRY_RUN", True), \
          patch("app.review.orchestrator.REVIEW_CHUNK_MAX_WORKERS", 2), \
          patch("app.review.chunker.REVIEW_MAX_INPUT_TOKENS", 10):
-        t0 = time.time()
         orch.run(1, 8)
-        elapsed = time.time() - t0
 
     assert llm.chat.call_count == 2
-    # 2×0.15s 并行；Windows 调度略慢，放宽上界
-    assert elapsed < 0.45
+    assert len(call_times) == 2
+    # 并行：第二次 chat 在第一次 sleep 结束前启动（时间重叠）；串行则间隔 ≥0.15s
+    overlap_sec = (call_times[0] + 0.15) - call_times[1]
+    assert overlap_sec > 0.05, (
+        f"expected parallel chunk reviews (overlap), call_starts={call_times}"
+    )
     print("OK orchestrator parallel chunks")
 
 
@@ -1428,6 +1436,122 @@ def test_llm_factory_missing_key():
     print("OK llm factory missing key")
 
 
+def test_prompt_matrix_template_ok():
+    import sys
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from prompt_matrix_test import template_ok
+
+    ok, _ = template_ok({"review_completed": True, "score": 80, "http_status": 200})
+    assert ok
+
+    ok, reason = template_ok(
+        {"error": "HTTP Error 503: Service Unavailable", "review_completed": False}
+    )
+    assert not ok
+    assert "503" in reason
+
+    ok, _ = template_ok({"http_status": 503, "review_completed": False})
+    assert not ok
+
+    ok, reason = template_ok(
+        {"http_status": 200, "review_completed": False, "summary": "fail-open timeout"}
+    )
+    assert not ok
+    assert "fail-open" in reason
+    print("OK prompt matrix template_ok")
+
+
+def test_prompt_matrix_exit_code():
+    import sys
+    import tempfile
+    from pathlib import Path
+    from unittest.mock import patch
+
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    import prompt_matrix_test as pmt
+
+    def _ok(**extra):
+        base = {
+            "score": 90,
+            "review_completed": True,
+            "issues": [],
+            "http_status": 200,
+            "system_template": "variants/x.j2",
+            "prompt_sha256": "abc",
+        }
+        base.update(extra)
+        return base
+
+    def _fail503():
+        return {
+            "http_status": 503,
+            "error": "HTTP Error 503: REVIEW_API_SECRET not configured",
+            "review_completed": False,
+            "score": 0,
+            "issues": [],
+        }
+
+    variants = [{"id": "t_ok"}, {"id": "t_fail"}]
+
+    with tempfile.TemporaryDirectory() as td:
+        out = Path(td)
+        argv = [
+            "prompt_matrix_test.py",
+            "--project-id", "1",
+            "--mr-iid", "2",
+            "--output-dir", str(out),
+        ]
+        with patch.object(sys, "argv", argv):
+            with patch.object(pmt, "load_dotenv"):
+                with patch.object(pmt, "load_variants", return_value=variants):
+                    with patch.object(pmt, "post_review", side_effect=[_ok(), _ok()]):
+                        assert pmt.main() == 0
+                    assert (out / "matrix_summary.json").is_file()
+
+        out2 = Path(tempfile.mkdtemp())
+        try:
+            argv2 = [
+                "prompt_matrix_test.py",
+                "--project-id", "1",
+                "--mr-iid", "2",
+                "--output-dir", str(out2),
+            ]
+            with patch.object(sys, "argv", argv2):
+                with patch.object(pmt, "load_dotenv"):
+                    with patch.object(pmt, "load_variants", return_value=variants):
+                        with patch.object(pmt, "post_review", side_effect=[_ok(), _fail503()]):
+                            assert pmt.main() == 1
+            summary = __import__("json").loads((out2 / "matrix_summary.json").read_text())
+            assert summary["failed"] == 1
+            assert summary["ok"] is False
+        finally:
+            import shutil
+            shutil.rmtree(out2, ignore_errors=True)
+
+        argv_empty = [
+            "prompt_matrix_test.py",
+            "--project-id", "1",
+            "--mr-iid", "2",
+            "--output-dir", str(out),
+            "--templates", "nonexistent_id",
+        ]
+        with patch.object(sys, "argv", argv_empty):
+            with patch.object(pmt, "load_dotenv"):
+                with patch.object(
+                    pmt,
+                    "load_variants",
+                    return_value=[{"id": "real_only"}],
+                ):
+                    assert pmt.main() == 1
+    print("OK prompt matrix exit code")
+
+
 def _write_smoke_report(path, run_id, entries, failed, total):
     import json
     from pathlib import Path
@@ -1550,6 +1674,8 @@ if __name__ == "__main__":
         test_changelog_upsert_note,
         test_describe_tool_mock,
         test_llm_factory_missing_key,
+        test_prompt_matrix_template_ok,
+        test_prompt_matrix_exit_code,
     ]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     entries = []

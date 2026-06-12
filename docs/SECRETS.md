@@ -1,13 +1,19 @@
 # 密钥与环境变量
 
-所有敏感配置放在 **`evn/.env`**（勿提交 Git）。模板见 [`evn/.env.example`](../evn/.env.example)。
+配置可写在 **`evn/.env`**（勿提交 Git）或 **操作系统环境变量**。模板见 [`evn/.env.example`](../evn/.env.example)。
+
+**加载优先级**（`app/env_loader.py`）：`LLM_API_KEY`、`LLM_MODEL` 等关键项 **先读 User/Machine/Process 环境变量**，读不到再用 `evn/.env` 非空值回填。`evn/.env` 中的空值不会覆盖你已配置的系统环境变量。
 
 ## 必填项（评审正常运行）
 
 | 变量 | 说明 |
 |------|------|
 | `AICR_BOT_TOKEN` | GitLab Bot/PAT，用于读 MR、发评论 |
-| `GITLAB_URL` | GitLab 根 URL；本地 `http://localhost:8000`，Docker 网络内常为 `http://gitlab:8000` |
+| `GITLAB_URL` | GitLab 根 URL；本地 `http://localhost:8000` |
+| `GITLAB_START_COMMAND` | （可选）覆盖默认 Rancher+compose 启动链路 |
+| `RANCHER_RDCTL` | Rancher `rdctl.exe` 路径（L3 脚本自动启动用） |
+| `RANCHER_DOCKER_BIN` | Rancher `docker.exe` 目录，默认 `%USERPROFILE%\.rd\bin` |
+| `GITLAB_IMAGE_MIRROR` | Docker Hub 不可达时 GitLab CE 镜像源，默认 `docker.m.daocloud.io/gitlab/gitlab-ce:latest` |
 | `LLM_API_KEY` | LLM 服务 API Key |
 | `LLM_MODEL` | 模型名称（如 `deepseek-chat`） |
 

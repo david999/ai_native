@@ -18,7 +18,7 @@ SMOKE_TEST_ZH: dict[str, tuple[str, str]] = {
     "test_partial_chunk_incomplete": ("评审流水线", "部分 chunk 失败 → review_completed=false"),
     "test_orchestrator_success": ("评审流水线", "Mock LLM 成功 → 聚合 score/issues"),
     "test_orchestrator_filters_out_of_diff": ("评审流水线", "diff hunk 外的 issue 被过滤"),
-    "test_orchestrator_skip_unchanged_sha": ("评审流水线", "head SHA 未变时跳过 LLM"),
+    "test_orchestrator_skip_unchanged_sha": ("评审流水线", "head SHA 未变时跳过 LLM，仍返回 system_template/prompt_sha256"),
     "test_orchestrator_parallel_chunks": ("评审流水线", "多块 MR 并行调用 LLM"),
     "test_orchestrator_deletions_only": ("评审流水线", "仅删除变更合成评审块"),
     "test_diff_compress_deletion_only_hunk": ("评审流水线", "diff 压缩：deletion-only hunk"),
@@ -80,6 +80,8 @@ SMOKE_TEST_ZH: dict[str, tuple[str, str]] = {
     "test_changelog_upsert_note": ("阶段 C", "CHANGELOG note 去重更新"),
     "test_describe_tool_mock": ("阶段 C", "describe 写回 MR 并抑制 webhook"),
     "test_llm_factory_missing_key": ("LLM", "未配置 LLM_API_KEY 时工厂抛错"),
+    "test_prompt_matrix_template_ok": ("L3 矩阵", "template_ok 判定 503/fail-open/成功"),
+    "test_prompt_matrix_exit_code": ("L3 矩阵", "prompt_matrix_test 矩阵失败 exit 1、全通过 exit 0"),
 }
 
 L1_REPORT_TITLE_ZH = "L1 冒烟测试报告"

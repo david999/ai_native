@@ -23,3 +23,21 @@ app = FastAPI(
     description="LLM-powered code review for GitLab merge requests",
 )
 app.include_router(router)
+
+
+@app.on_event("startup")
+def _log_review_api_auth_mode() -> None:
+    from app.config import REVIEW_API_ALLOW_INSECURE, REVIEW_API_SECRET
+
+    logger = logging.getLogger("aicr")
+    if REVIEW_API_SECRET:
+        logger.info("Review API auth: REVIEW_API_SECRET configured")
+    elif REVIEW_API_ALLOW_INSECURE:
+        logger.warning(
+            "Review API auth: REVIEW_API_ALLOW_INSECURE=1 (local/dev only; do not use in production)"
+        )
+    else:
+        logger.warning(
+            "Review API auth: no secret; POST /review returns 503 until "
+            "REVIEW_API_SECRET or REVIEW_API_ALLOW_INSECURE=1"
+        )

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 探测并在需要时通过 Docker Compose 启动本地 GitLab（L3 用）
+# 探测并在需要时启动本地 GitLab（不使用 Docker）
 set -euo pipefail
 
 URL="${GITLAB_URL:-http://localhost:8000}"
@@ -17,33 +17,39 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-COMPOSE_DIR="$REPO_ROOT/evn/gitlab"
+START_SCRIPT="$SCRIPT_DIR/start_gitlab.sh"
+ENV_FILE="$REPO_ROOT/evn/.env"
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source <(grep -v '^\s*#' "$ENV_FILE" | grep -v '^\s*$' || true)
+  set +a
+fi
 
 gitlab_ready() {
   curl -sf -o /dev/null --max-time 8 "$URL" 2>/dev/null
 }
 
-echo "Checking GitLab at $URL"
+echo "Checking GitLab at $URL (no Docker)"
 if gitlab_ready; then
   echo "GitLab ready at $URL"
   exit 0
 fi
 
 if [[ "$NO_START" -eq 1 ]]; then
-  echo "GitLab not ready (-no-start: will not start Docker)." >&2
+  echo "GitLab not ready (-no-start)." >&2
   exit 1
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "GitLab not reachable and docker CLI not found." >&2
-  echo "Install Docker or start GitLab manually at $URL" >&2
+if [[ -x "$START_SCRIPT" ]]; then
+  echo "Invoking start_gitlab.sh ..."
+  bash "$START_SCRIPT"
+else
+  echo "No GitLab start script at $START_SCRIPT" >&2
+  echo "Set GITLAB_START_COMMAND or create evn/gitlab/start.sh" >&2
   exit 1
 fi
-
-echo "Starting GitLab via Docker Compose ($COMPOSE_DIR)..."
-docker network inspect gitlab_default >/dev/null 2>&1 || docker network create gitlab_default
-(cd "$COMPOSE_DIR" && docker compose up -d gitlab)
-echo "GitLab container starting (first boot may take several minutes)..."
 
 for i in $(seq 1 "$MAX_ATTEMPTS"); do
   if gitlab_ready; then
@@ -54,6 +60,5 @@ for i in $(seq 1 "$MAX_ATTEMPTS"); do
   sleep "$INTERVAL"
 done
 
-echo "GitLab still not ready at $URL after docker compose up." >&2
-echo "Check: docker logs gitlab" >&2
+echo "GitLab still not ready at $URL." >&2
 exit 1

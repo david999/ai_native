@@ -48,23 +48,19 @@ def _is_safe_relative_template(path: str) -> bool:
 
 
 def _file_for_allowed_key(key: str) -> str | None:
-    """将 id 或相对路径解析为 prompts/ 下的模板文件路径。"""
+    """将 id 或相对路径解析为 prompts/ 下的模板文件路径（须在 allowlist 内）。"""
     key = (key or "").strip()
     if not key or ".." in key:
         return None
     allowed = _allowed_template_paths()
-    if key in allowed and key.endswith(".j2"):
-        if (_PROMPTS_DIR / key).is_file():
-            return key.replace("\\", "/")
     if key in allowed and not key.endswith(".j2"):
         candidate = f"variants/{key}.j2"
         if (_PROMPTS_DIR / candidate).is_file():
             return candidate
-    if key.endswith(".j2") and _is_safe_relative_template(key):
-        if key in allowed and (_PROMPTS_DIR / key).is_file():
+    if key.endswith(".j2") and key in allowed and _is_safe_relative_template(key):
+        path = _PROMPTS_DIR / key
+        if path.is_file():
             return key.replace("\\", "/")
-        if key.startswith("variants/") and (_PROMPTS_DIR / key).is_file():
-            return key
     return None
 
 

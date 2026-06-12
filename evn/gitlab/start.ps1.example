@@ -1,0 +1,9 @@
+# 复制为 start.ps1 并按你的本机 GitLab 安装方式填写（不使用 Docker）
+# 示例：启动 Windows 服务
+# Start-Service -Name "gitlab-runsvdir"
+
+# 示例：调用你已有的启动脚本
+# & "D:\apps\gitlab\start.bat"
+
+Write-Error "evn/gitlab/start.ps1 未配置。请从 start.ps1.example 复制并填写本机 GitLab 启动命令。"
+exit 1

@@ -25,6 +25,8 @@ REVIEW_API_SECRET=...                     # 生产必填；CI 用 X-AICR-Secret
 REVIEW_API_ALLOW_INSECURE=0               # 仅本地：无 secret 时允许 /review
 ```
 
+启动 uvicorn 时会在日志中输出 Review API 鉴权模式（便于发现误开 `REVIEW_API_ALLOW_INSECURE`）。
+
 ## 本地启动
 
 ```powershell

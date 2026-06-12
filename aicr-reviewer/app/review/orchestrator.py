@@ -125,10 +125,25 @@ class ReviewOrchestrator:
             "prompt_sha256": self._last_prompt_sha256,
         }
 
+    def _resolve_template_fields(self, ctx: MRContext) -> tuple[str, str]:
+        """跳过 LLM 时仍解析将使用的 system 模板（供 API/报告字段一致）。"""
+        hint_files = list(ctx.changed_files or [])
+        if not hint_files and ctx.deleted_files:
+            hint_files = [{"new_path": p} for p in ctx.deleted_files]
+        language_hint = infer_language_hint(hint_files)
+        template_name, system_prompt = self.renderer.render_system(
+            context_md=ctx.context_md or "",
+            language_hint=language_hint,
+            template_override=self._system_template_override,
+            strict_override=self._strict_template_override,
+        )
+        return template_name, prompt_sha256(system_prompt)
+
     def _skipped_result(
         self, ctx: MRContext, gl_session: GitLabMRSession
     ) -> Dict[str, Any]:
         summary = ctx.skip_reason or "Review skipped: no new changes"
+        template_name, prompt_hash = self._resolve_template_fields(ctx)
         publish_ok = True
         if not REVIEW_DRY_RUN:
             publish_ok = self.publisher.publish_summary(
@@ -146,9 +161,9 @@ class ReviewOrchestrator:
             "issues": [],
             "code_quality": [],
             "review_completed": publish_ok,
-            "system_template": "",
+            "system_template": template_name,
             "system_template_requested": getattr(self, "_system_template_requested", ""),
-            "prompt_sha256": "",
+            "prompt_sha256": prompt_hash,
         }
 
     def _review_all_chunks(
