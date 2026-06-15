@@ -52,6 +52,7 @@
 | [docs/GITHUB_REFERENCES.md](docs/GITHUB_REFERENCES.md) | **外部开源参考**（pr-agent / ai-pr-reviewer / reviewdog 与阶段 A/B/C 落点） |
 | [docs/PHASE_C.md](docs/PHASE_C.md) | 阶段 C：describe、CHANGELOG、评论对话、config.toml |
 | [docs/SECRETS.md](docs/SECRETS.md) | 密钥与环境变量说明 |
+| [docs/GITHUB_ACCESS_CN_MOBILE.md](docs/GITHUB_ACCESS_CN_MOBILE.md) | **国内手机（华为/安卓）访问 GitHub**（Cursor Cloud 场景，已筛选可行方案） |
 
 ## 评审触发方式
 
