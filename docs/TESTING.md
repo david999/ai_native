@@ -37,7 +37,7 @@ pip install -r requirements.txt
 python scripts\smoke_test.py
 ```
 
-成功时最后一行输出：`All 81 smoke tests passed.`（数量以 `smoke_test.py` 内 `tests` 列表为准）。
+成功时最后一行输出：`All 82 smoke tests passed.`（数量以 `smoke_test.py` 内 `tests` 列表为准）。
 
 可选 JSON + 中文 Markdown：`python scripts/smoke_test.py --report-json ../test-results/l1-smoke.json`（同时生成 `l1-smoke.md`）
 

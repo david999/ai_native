@@ -43,7 +43,8 @@ class TimingRecorder:
         self._t0: float | None = None
 
     def start(self, phase_id: str, label: str) -> None:
-        self.end(ok=True)
+        if self._current is not None:
+            self.end(ok=False, reason="auto-closed: next phase started")
         self._current = {"id": phase_id, "label": label}
         self._t0 = time.perf_counter()
         self._current["started"] = datetime.now(timezone.utc).isoformat()
@@ -133,3 +134,116 @@ def gate_phases_for_level(level: str) -> list[tuple[str, str]]:
     if level == "L3-standard":
         return base[:5]
     return base
+
+
+def progress_plan_for_level(level: str) -> list[tuple[str, str]]:
+    """控制台进度条用的逐步任务列表（不含聚合项 scenario_suite）。"""
+    scenarios = [
+        ("scenario_S01_clean_refactor", "场景 S01 baseline"),
+        ("scenario_S02_npe_optional", "场景 S02 baseline"),
+        ("scenario_S03_empty_catch", "场景 S03 baseline"),
+        ("scenario_S04_hardcoded_secret", "场景 S04 baseline"),
+        ("scenario_S05_feign_no_timeout", "场景 S05 baseline"),
+    ]
+    l3_tail = [
+        ("s02_matrix", "S02 三模板矩阵"),
+        ("ci_gate", "CI 门禁"),
+        ("gitlab_publish", "GitLab 发帖（S02）"),
+        ("s06_incremental", "S06 增量评审"),
+        ("phase_c", "Phase C 抽检"),
+    ]
+    if level == "L3-full":
+        return [
+            ("L1", "L1 冒烟"),
+            ("L2", "L2 健康"),
+            ("l3_env_setup", "L3 环境（GitLab + Demo）"),
+            *scenarios,
+            *l3_tail,
+        ]
+    if level == "L3-standard":
+        return [
+            ("L1", "L1 冒烟"),
+            ("L2", "L2 健康"),
+            ("l3_env_setup", "L3 环境（GitLab + Demo）"),
+            *scenarios,
+        ]
+    if level in ("daily", "all"):
+        return [("L1", "L1 冒烟"), ("L2", "L2 健康")]
+    if level == "L1":
+        return [("L1", "L1 冒烟")]
+    if level == "L2":
+        return [("L2", "L2 健康")]
+    if level == "L3":
+        return [
+            ("L3", "L3 单场景 E2E"),
+        ]
+    return gate_phases_for_level(level)
+
+
+class ProgressReporter:
+    """验收控制台进度：当前阶段、本步/总步、总用时、剩余步数。"""
+
+    def __init__(self, level: str) -> None:
+        self.level = level
+        self.plan = progress_plan_for_level(level)
+        self.total = len(self.plan)
+        self._run_t0 = time.perf_counter()
+
+    def _elapsed_total(self) -> int:
+        return int(time.perf_counter() - self._run_t0)
+
+    def _step_index(self, phase_id: str) -> int:
+        for i, (pid, _) in enumerate(self.plan, start=1):
+            if pid == phase_id:
+                return i
+        return 0
+
+    def print_plan(self) -> None:
+        if self.total <= 1:
+            return
+        print(f"=== {self.level} 验收计划：共 {self.total} 步 ===")
+        for i, (_, label) in enumerate(self.plan, start=1):
+            print(f"  {i:2d}. {label}")
+        print("")
+
+    def start(self, phase_id: str, label: str) -> None:
+        step = self._step_index(phase_id)
+        if step == 0:
+            print(f">>> {label} | 总用时 {format_duration(self._elapsed_total())}")
+            return
+        remaining = max(0, self.total - step + 1)
+        print(
+            f"[{self.level} {step}/{self.total}] >>> {label} "
+            f"| 总用时 {format_duration(self._elapsed_total())} "
+            f"| 剩余 {remaining} 步"
+        )
+
+    def end(
+        self,
+        phase_id: str,
+        label: str,
+        *,
+        seconds: int,
+        ok: bool = True,
+        skipped: bool = False,
+    ) -> None:
+        step = self._step_index(phase_id)
+        if skipped:
+            status = "未执行"
+        elif ok:
+            status = "通过"
+        else:
+            status = "失败"
+        tag = f"[{self.level} {step}/{self.total}]" if step else "[---]"
+        remaining = max(0, self.total - step) if step else "?"
+        print(
+            f"{tag} <<< {label} {status} {format_duration(seconds)} "
+            f"| 总用时 {format_duration(self._elapsed_total())} "
+            f"| 剩余 {remaining} 步"
+        )
+
+    def skip_remaining(self, phase_ids_labels: list[tuple[str, str]], reason: str) -> None:
+        for pid, label in phase_ids_labels:
+            self.end(pid, label, seconds=0, ok=False, skipped=True)
+            if reason:
+                print(f"    （跳过原因：{reason}）")

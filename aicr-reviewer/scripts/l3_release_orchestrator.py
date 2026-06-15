@@ -193,18 +193,59 @@ def scenario_baseline(
     }
 
 
-def run_standard(l3_dir: Path, *, assert_publish: bool, timing) -> dict:
+def setup_l3_env(*, skip_gitlab_infra: bool) -> bool:
+    """GitLab ensure + demo bootstrap（计入 l3_env_setup 耗时）。"""
+    if not skip_gitlab_infra:
+        gl = TEST_SCRIPTS / "ensure_gitlab.sh"
+        if gl.is_file():
+            rc = run_cmd(["bash", str(gl)], check=False)
+            if rc != 0:
+                return False
+    boot = TEST_SCRIPTS / "bootstrap_demo.sh"
+    if boot.is_file():
+        run_cmd(["bash", str(boot)])
+    return True
+
+
+def run_standard(
+    l3_dir: Path,
+    *,
+    assert_publish: bool,
+    timing,
+    t_start=None,
+    t_end=None,
+    skip_gitlab_infra: bool = False,
+) -> dict:
+    def phase_start(pid: str, label: str) -> None:
+        if t_start:
+            t_start(pid, label)
+        else:
+            timing.start(pid, label)
+
+    def phase_end(*, ok: bool = True, skipped: bool = False, reason: str = "") -> None:
+        if t_end:
+            t_end(ok=ok, skipped=skipped, reason=reason)
+        else:
+            timing.end(ok=ok, skipped=skipped, reason=reason)
+
     release: dict = {"scenarios": [], "warnings": [], "phases": {}}
     suite_ok = True
-    timing.start("l3_env_setup", "L3 环境（GitLab + Demo）")
-    timing.end(ok=True)
+    phase_start("l3_env_setup", "L3 环境（GitLab + Demo）")
+    env_ok = setup_l3_env(skip_gitlab_infra=skip_gitlab_infra)
+    phase_end(ok=env_ok)
+    if not env_ok:
+        release["warnings"].append("L3 env setup failed (GitLab/Demo)")
+        (l3_dir / "release_data.json").write_text(
+            json.dumps(release, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        return {"ok": False, "release": release, "env_failed": True}
 
     suite_t0 = time.perf_counter()
     for sid in STANDARD_SCENARIOS:
         print(f"=== Scenario {sid} (baseline) ===")
-        timing.start(f"scenario_{sid}", f"场景 {sid}")
+        phase_start(f"scenario_{sid}", f"场景 {sid} baseline")
         entry = scenario_baseline(sid, l3_dir, assert_publish=assert_publish)
-        timing.end(ok=entry["ok"])
+        phase_end(ok=entry["ok"])
         release["scenarios"].append(entry)
         if not entry["ok"]:
             suite_ok = False
@@ -226,7 +267,26 @@ def run_standard(l3_dir: Path, *, assert_publish: bool, timing) -> dict:
     return {"ok": suite_ok, "release": release}
 
 
-def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
+def run_full_extras(
+    l3_dir: Path,
+    release: dict,
+    s02: dict,
+    timing,
+    t_start=None,
+    t_end=None,
+) -> bool:
+    def phase_start(pid: str, label: str) -> None:
+        if t_start:
+            t_start(pid, label)
+        else:
+            timing.start(pid, label)
+
+    def phase_end(*, ok: bool = True, skipped: bool = False, reason: str = "") -> None:
+        if t_end:
+            t_end(ok=ok, skipped=skipped, reason=reason)
+        else:
+            timing.end(ok=ok, skipped=skipped, reason=reason)
+
     extras_ok = True
     phases = release.setdefault("phases", {})
     s02_mr = {"project_id": s02["project_id"], "mr_iid": s02["mr_iid"]}
@@ -235,7 +295,7 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
     s02_review = json.loads(review_path.read_text(encoding="utf-8"))
 
     print("=== S02 prompt matrix ===")
-    timing.start("s02_matrix", "S02 三模板矩阵")
+    phase_start("s02_matrix", "S02 三模板矩阵")
     matrix_dir = l3_dir / "S02_npe_optional_matrix"
     matrix_rc = run_cmd(
         [
@@ -255,7 +315,7 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
     )
     matrix_ok = matrix_rc == 0
     phases["s02_matrix"] = {"ok": matrix_ok}
-    timing.end(ok=matrix_ok)
+    phase_end(ok=matrix_ok)
     if not matrix_ok:
         extras_ok = False
     ms = matrix_dir / "matrix_summary.json"
@@ -263,7 +323,7 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
         release["matrix_summary"] = json.loads(ms.read_text(encoding="utf-8"))
 
     print("=== CI review gate (cached S02 score) ===")
-    timing.start("ci_gate", "CI 门禁")
+    phase_start("ci_gate", "CI 门禁")
     gate_exit = evaluate_ci_gate(
         s02_review.get("score"),
         review_completed=bool(s02_review.get("review_completed")),
@@ -275,19 +335,19 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
         "expected_exit": 1,
         "cached": True,
     }
-    timing.end(ok=gate_ok)
+    phase_end(ok=gate_ok)
     if not gate_ok:
         extras_ok = False
 
-    timing.start("gitlab_publish", "GitLab 发帖（S02）")
+    phase_start("gitlab_publish", "GitLab 发帖（S02）")
     pub_ok = bool(s02.get("publish_ok", False))
     phases["gitlab_publish"] = {"ok": pub_ok}
-    timing.end(ok=pub_ok)
+    phase_end(ok=pub_ok)
     if not pub_ok:
         extras_ok = False
 
     print("=== S06 incremental ===")
-    timing.start("s06_incremental", "S06 增量评审")
+    phase_start("s06_incremental", "S06 增量评审")
     s06_branch = "aicr-test/S06_incremental"
     s06_dir = l3_dir / "S06_incremental"
     s06_dir.mkdir(parents=True, exist_ok=True)
@@ -306,8 +366,9 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
         check=False,
     ):
         extras_ok = False
-        timing.end(ok=False)
+        phase_end(ok=False)
         timing.add_skipped("phase_c", "Phase C 抽检", "S06 incremental failed")
+        progress.end("phase_c", "Phase C 抽检", seconds=0, ok=False, skipped=True)
     else:
         run_cmd(
             [
@@ -396,13 +457,14 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
             "second_sha": second.get("prompt_sha256"),
             "second_ok": s06_ok,
         }
-        timing.end(ok=s06_ok)
+        phase_end(ok=s06_ok)
         if not s06_ok:
             extras_ok = False
             timing.add_skipped("phase_c", "Phase C 抽检", "S06 validation failed")
+            progress.end("phase_c", "Phase C 抽检", seconds=0, ok=False, skipped=True)
         else:
             print("=== Phase C smoke ===")
-            timing.start("phase_c", "Phase C 抽检")
+            phase_start("phase_c", "Phase C 抽检")
             phase_rc = run_cmd(
                 [
                     _py(),
@@ -417,7 +479,7 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
                 check=False,
             )
             phases["phase_c"] = {"ok": phase_rc == 0}
-            timing.end(ok=phase_rc == 0)
+            phase_end(ok=phase_rc == 0)
             if phase_rc != 0:
                 extras_ok = False
 
@@ -436,6 +498,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--record-dir", required=True)
     parser.add_argument("--mode", choices=("standard", "full"), required=True)
+    parser.add_argument(
+        "--skip-gitlab-infra",
+        action="store_true",
+        help="Skip ensure_gitlab (preflight already brought GitLab up)",
+    )
     args = parser.parse_args()
 
     if str(AICR_ROOT) not in sys.path:
@@ -453,14 +520,47 @@ def main() -> int:
         return 1
 
     sys.path.insert(0, str(SCRIPTS))
-    from acceptance_timing import TimingRecorder
+    from acceptance_timing import ProgressReporter, TimingRecorder
 
     timing = TimingRecorder()
+    level = "L3-full" if args.mode == "full" else "L3-standard"
+    progress = ProgressReporter(level)
+    progress.print_plan()
+
+    def t_start(phase_id: str, label: str) -> None:
+        timing.start(phase_id, label)
+        progress.start(phase_id, label)
+
+    def t_end(*, ok: bool = True, skipped: bool = False, reason: str = "") -> None:
+        if not timing._current:
+            return
+        pid = timing._current["id"]
+        label = timing._current["label"]
+        timing.end(ok=ok, skipped=skipped, reason=reason)
+        entry = timing.phases[-1] if timing.phases else {}
+        progress.end(pid, label, seconds=int(entry.get("seconds") or 0), ok=ok, skipped=skipped)
+
     assert_pub = args.mode == "full"
-    result = run_standard(l3_dir, assert_publish=assert_pub, timing=timing)
+    result = run_standard(
+        l3_dir,
+        assert_publish=assert_pub,
+        timing=timing,
+        t_start=t_start,
+        t_end=t_end,
+        skip_gitlab_infra=args.skip_gitlab_infra,
+    )
+    if result.get("env_failed"):
+        if args.mode == "full":
+            add_full_skipped_extras(timing)
+            for pid, label in L3_FULL_SKIPPED_EXTRAS:
+                progress.end(pid, label, seconds=0, ok=False, skipped=True)
+        timing.write(record_dir / "timing.json")
+        return 1
     if not result["ok"]:
         if args.mode == "full":
             add_full_skipped_extras(timing)
+            for pid, label in L3_FULL_SKIPPED_EXTRAS:
+                progress.end(pid, label, seconds=0, ok=False, skipped=True)
         timing.write(record_dir / "timing.json")
         return 1
     if args.mode == "standard":
@@ -472,12 +572,14 @@ def main() -> int:
     release["phases"]["gitlab_publish"] = {"ok": s02.get("publish_ok", False)}
     if not s02.get("publish_ok"):
         add_full_skipped_extras(timing, "S02 GitLab publish failed")
+        for pid, label in L3_FULL_SKIPPED_EXTRAS:
+            progress.end(pid, label, seconds=0, ok=False, skipped=True)
         timing.write(record_dir / "timing.json")
         (l3_dir / "release_data.json").write_text(
             json.dumps(release, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         return 1
-    ok = run_full_extras(l3_dir, release, s02, timing)
+    ok = run_full_extras(l3_dir, release, s02, timing, t_start=t_start, t_end=t_end)
     timing.write(record_dir / "timing.json")
     if not ok:
         return 1

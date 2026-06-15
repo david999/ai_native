@@ -960,6 +960,7 @@ def test_health_detail():
     assert body["status"] == "ok"
     assert "gitlab_url" in body
     assert "review_max_concurrent" in body
+    assert "review_dry_run" in body
     print("OK health detail")
 
 
@@ -1624,6 +1625,7 @@ def test_acceptance_timing():
         format_duration,
         gate_phases_for_level,
         phase_result_label,
+        progress_plan_for_level,
     )
 
     assert format_duration(None) == "—"
@@ -1634,6 +1636,7 @@ def test_acceptance_timing():
     assert phase_result_label({"ok": True}) == "通过"
     assert len(gate_phases_for_level("L3-full")) >= 9
     assert len(gate_phases_for_level("L3-standard")) == 5
+    assert len(progress_plan_for_level("L3-full")) == 13
 
     rec = TimingRecorder()
     rec.start("L1", "L1 冒烟")
@@ -1643,7 +1646,44 @@ def test_acceptance_timing():
     assert data["total_seconds"] >= 0
     assert len(data["phases"]) == 2
     assert data["phases"][1]["skipped"] is True
+
+    rec2 = TimingRecorder()
+    rec2.start("a", "A")
+    rec2.start("b", "B")
+    assert len(rec2.phases) == 1
+    assert rec2.phases[0]["ok"] is False
     print("OK acceptance_timing")
+
+
+def test_l3_full_preflight():
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from l3_full_preflight import (
+        _is_placeholder_secret,
+        run_preflight,
+        write_abort_artifacts,
+    )
+
+    assert _is_placeholder_secret("AICR_BOT_TOKEN", "glpat-...", {"AICR_BOT_TOKEN": "glpat-..."})
+    assert _is_placeholder_secret("LLM_API_KEY", "", {})
+    assert not _is_placeholder_secret("LLM_API_KEY", "sk-real-key", {})
+
+    with tempfile.TemporaryDirectory() as td:
+        record = Path(td)
+        write_abort_artifacts(record, reason="test abort")
+        summary = json.loads((record / "summary.json").read_text(encoding="utf-8"))
+        assert summary["aborted"] is True
+        assert summary["failed"] is True
+
+    result = run_preflight(record_dir=None, skip_infra=True)
+    assert "checks" in result
+    assert "infra_ready" in result
+    print("OK l3_full_preflight")
 
 
 def _write_smoke_report(path, run_id, entries, failed, total):
@@ -1773,6 +1813,7 @@ if __name__ == "__main__":
         test_validate_scenario,
         test_assert_gitlab_publish,
         test_acceptance_timing,
+        test_l3_full_preflight,
     ]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     entries = []

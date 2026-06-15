@@ -85,6 +85,7 @@ SMOKE_TEST_ZH: dict[str, tuple[str, str]] = {
     "test_validate_scenario": ("L3 验收", "validate_scenario 分数/关键词/文件命中"),
     "test_assert_gitlab_publish": ("L3 验收", "assert_gitlab_publish AICR note 识别"),
     "test_acceptance_timing": ("L3 验收", "acceptance_timing 耗时格式化与 timing.json"),
+    "test_l3_full_preflight": ("L3 验收", "L3-full preflight 占位符与中止 summary"),
 }
 
 L1_REPORT_TITLE_ZH = "L1 冒烟测试报告"
@@ -109,6 +110,7 @@ DETAIL_FIELD_ZH: dict[str, str] = {
     "llm_key_set": "LLM API Key 已配置",
     "review_auth_required": "评审 API 需要密钥",
     "review_api_allow_insecure": "允许无密钥评审（仅本地）",
+    "review_dry_run": "评审 dry-run（不写入 GitLab）",
     "review_max_concurrent": "最大并发评审数",
     "incremental_review": "增量评审已启用",
     "describe_enabled": "describe 工具已启用",

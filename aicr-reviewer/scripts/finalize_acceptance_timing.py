@@ -51,11 +51,13 @@ def finalize(record_dir: Path, *, level: str, failed: bool) -> None:
 
     l2 = _read_json(record_dir / "l2-health.json")
     if l2 is not None:
+        l2_timing = _read_json(record_dir / "l2-timing.json") or {}
+        l2_sec = int(l2_timing.get("seconds") or 1)
         rec.phases.append(
             {
                 "id": "L2",
                 "label": "L2 健康",
-                "seconds": 1,
+                "seconds": max(1, l2_sec),
                 "ok": bool(l2.get("ok")),
                 "ended": datetime.now(timezone.utc).isoformat(),
             }

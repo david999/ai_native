@@ -174,7 +174,7 @@ def health():
 
 @router.get("/health/detail")
 def health_detail():
-    from app.config import GITLAB_URL, LLM_PROVIDER, LLM_MODEL, REVIEW_MAX_CONCURRENT
+    from app.config import GITLAB_URL, LLM_PROVIDER, LLM_MODEL, REVIEW_MAX_CONCURRENT, REVIEW_DRY_RUN
     return {
         "status": "ok",
         "gitlab_url": GITLAB_URL,
@@ -184,6 +184,7 @@ def health_detail():
         "llm_key_set": bool(LLM_API_KEY),
         "review_auth_required": bool(REVIEW_API_SECRET),
         "review_api_allow_insecure": REVIEW_API_ALLOW_INSECURE,
+        "review_dry_run": REVIEW_DRY_RUN,
         "review_max_concurrent": REVIEW_MAX_CONCURRENT,
         "incremental_review": AICR_INCREMENTAL_REVIEW,
         "describe_enabled": AICR_DESCRIBE_ENABLED,

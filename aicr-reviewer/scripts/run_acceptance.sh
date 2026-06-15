@@ -9,6 +9,10 @@ TS="$(date -u +%Y-%m-%dT%H%M%S)"
 RECORD_DIR="${RECORD_DIR:-$REPO_ROOT/test-results/$TS}"
 SCENARIO="${SCENARIO:-S02_npe_optional}"
 mkdir -p "$RECORD_DIR"
+STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$RECORD_DIR/meta.json" <<EOF
+{"started":"$STARTED","level":"$LEVEL","record_dir":"$RECORD_DIR"}
+EOF
 
 echo "Acceptance run: $RECORD_DIR (level=$LEVEL)"
 
@@ -18,6 +22,7 @@ if [[ ! -d .venv ]]; then
   .venv/bin/pip install -q -r requirements.txt
 fi
 PY=".venv/bin/python"
+PROGRESS=(scripts/acceptance_progress.py --record-dir "$RECORD_DIR" --level "$LEVEL")
 
 should_run() {
   case "$LEVEL" in
@@ -27,6 +32,10 @@ should_run() {
     *) [[ "$LEVEL" == "$1" ]] ;;
   esac
 }
+
+if [[ "$LEVEL" == "L3-full" || "$LEVEL" == "L3-standard" ]]; then
+  "$PY" "${PROGRESS[@]}" plan
+fi
 
 ensure_aicr_for_l3() {
   "$PY" - <<'PY'
@@ -59,25 +68,60 @@ elif not detail.get("review_api_allow_insecure"):
 PY
 }
 
+preflight_infra_ready() {
+  [[ -f "$RECORD_DIR/preflight.json" ]] || return 1
+  "$PY" -c "import json,sys; d=json.load(open('$RECORD_DIR/preflight.json')); sys.exit(0 if d.get('infra_ready') else 1)"
+}
+
 FAILED=0
 L3_SKIPPED=0
 
-if should_run L1; then
-  echo "=== L1 smoke ==="
-  "$PY" scripts/smoke_test.py --report-json "$RECORD_DIR/l1-smoke.json"
+if [[ "$LEVEL" == "L3-full" ]]; then
+  echo "=== L3-full 跑前自动检查 ==="
+  PREFLIGHT=(scripts/l3_full_preflight.py --record-dir "$RECORD_DIR" --report-json "$RECORD_DIR/preflight.json")
+  if ! "$PY" "${PREFLIGHT[@]}"; then
+    echo ""
+    echo "L3-full 已中止：请按上方「需要您处理」逐项修复后重跑。"
+    exit 1
+  fi
+  echo ""
 fi
 
-if should_run L2; then
+if should_run L1; then
+  echo "=== L1 smoke ==="
+  l1_t0=$SECONDS
+  "$PY" "${PROGRESS[@]}" start L1 "L1 冒烟"
+  if ! "$PY" scripts/smoke_test.py --report-json "$RECORD_DIR/l1-smoke.json"; then
+    FAILED=1
+  fi
+  l1_sec=$((SECONDS - l1_t0))
+  if [[ "$FAILED" -eq 0 ]]; then
+    "$PY" "${PROGRESS[@]}" end L1 "L1 冒烟" --seconds "$l1_sec" --ok
+  else
+    "$PY" "${PROGRESS[@]}" end L1 "L1 冒烟" --seconds "$l1_sec" --fail
+  fi
+fi
+
+if [[ "$FAILED" -eq 0 ]] && should_run L2; then
   echo "=== L2 health ==="
+  l2_t0=$SECONDS
+  "$PY" "${PROGRESS[@]}" start L2 "L2 健康"
   if ! curl -sf http://localhost:8001/health >/dev/null 2>&1; then
     echo "Start AICR first: ./scripts/run_local.sh"
   fi
   if ! "$PY" scripts/health_check.py --report-json "$RECORD_DIR/l2-health.json"; then
     FAILED=1
   fi
+  l2_sec=$((SECONDS - l2_t0))
+  echo "{\"seconds\":$l2_sec}" >"$RECORD_DIR/l2-timing.json"
+  if [[ "$FAILED" -eq 0 ]]; then
+    "$PY" "${PROGRESS[@]}" end L2 "L2 健康" --seconds "$l2_sec" --ok
+  else
+    "$PY" "${PROGRESS[@]}" end L2 "L2 健康" --seconds "$l2_sec" --fail
+  fi
 fi
 
-if should_run L3; then
+if [[ "$FAILED" -eq 0 ]] && should_run L3; then
   echo "=== L3 E2E (GitLab + LLM) ==="
   mkdir -p "$RECORD_DIR/l3"
   if ! ensure_aicr_for_l3; then
@@ -122,12 +166,11 @@ run_l3_orchestrator() {
   if ! ensure_aicr_for_l3; then
     return 1
   fi
-  if ! bash "$REPO_ROOT/test_data/scripts/ensure_gitlab.sh"; then
-    L3_SKIPPED=1
-    return 1
+  local orch_args=(scripts/l3_release_orchestrator.py --record-dir "$RECORD_DIR" --mode "$mode")
+  if preflight_infra_ready; then
+    orch_args+=(--skip-gitlab-infra)
   fi
-  bash "$REPO_ROOT/test_data/scripts/bootstrap_demo.sh"
-  if ! "$PY" scripts/l3_release_orchestrator.py --record-dir "$RECORD_DIR" --mode "$mode"; then
+  if ! "$PY" "${orch_args[@]}"; then
     return 1
   fi
   return 0

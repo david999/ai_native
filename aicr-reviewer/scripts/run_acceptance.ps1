@@ -64,6 +64,139 @@ $script:AcceptanceTimingPhases = @()
 $script:AcceptanceTimingStart = $null
 $script:AcceptanceTimingCurrent = $null
 $script:AcceptanceTimingSw = $null
+$script:AcceptanceProgressLevel = $null
+
+function Format-AcceptanceDuration {
+    param([int]$Seconds)
+    if ($Seconds -lt 60) { return "${Seconds}s" }
+    $m = [math]::Floor($Seconds / 60)
+    $s = $Seconds % 60
+    if ($m -lt 60) { return "${m}m$("{0:D2}" -f $s)s" }
+    $h = [math]::Floor($m / 60)
+    $m = $m % 60
+    return "${h}h$("{0:D2}" -f $m)m"
+}
+
+function Get-AcceptanceProgressPlan {
+    param([string]$Level)
+    $scenarios = @(
+        @("scenario_S01_clean_refactor", "场景 S01 baseline"),
+        @("scenario_S02_npe_optional", "场景 S02 baseline"),
+        @("scenario_S03_empty_catch", "场景 S03 baseline"),
+        @("scenario_S04_hardcoded_secret", "场景 S04 baseline"),
+        @("scenario_S05_feign_no_timeout", "场景 S05 baseline")
+    )
+    $l3Tail = @(
+        @("s02_matrix", "S02 三模板矩阵"),
+        @("ci_gate", "CI 门禁"),
+        @("gitlab_publish", "GitLab 发帖（S02）"),
+        @("s06_incremental", "S06 增量评审"),
+        @("phase_c", "Phase C 抽检")
+    )
+    switch ($Level) {
+        "L3-full" {
+            $plan = @(
+                @("L1", "L1 冒烟"),
+                @("L2", "L2 健康"),
+                @("l3_env_setup", "L3 环境（GitLab + Demo）")
+            )
+            $plan += $scenarios
+            $plan += $l3Tail
+            return $plan
+        }
+        "L3-standard" {
+            $plan = @(
+                @("L1", "L1 冒烟"),
+                @("L2", "L2 健康"),
+                @("l3_env_setup", "L3 环境（GitLab + Demo）")
+            )
+            $plan += $scenarios
+            return $plan
+        }
+        "daily" { return @(@("L1", "L1 冒烟"), @("L2", "L2 健康")) }
+        "all"   { return @(@("L1", "L1 冒烟"), @("L2", "L2 健康")) }
+        "L1"    { return @(@("L1", "L1 冒烟")) }
+        "L2"    { return @(@("L2", "L2 健康")) }
+        "L3"    { return @(@("L3", "L3 单场景 E2E")) }
+        default { return @() }
+    }
+}
+
+function Get-AcceptanceTotalElapsedSeconds {
+    if (-not $script:AcceptanceTimingStart) { return 0 }
+    return [int](((Get-Date).ToUniversalTime() - $script:AcceptanceTimingStart).TotalSeconds)
+}
+
+function Get-AcceptanceProgressStepIndex {
+    param([string]$PhaseId)
+    if (-not $script:AcceptanceProgressPlan) { return 0 }
+    for ($i = 0; $i -lt $script:AcceptanceProgressPlan.Count; $i++) {
+        if ($script:AcceptanceProgressPlan[$i][0] -eq $PhaseId) { return ($i + 1) }
+    }
+    return 0
+}
+
+function Initialize-AcceptanceProgress {
+    param([string]$Level)
+    $script:AcceptanceProgressLevel = $Level
+    $script:AcceptanceProgressPlan = Get-AcceptanceProgressPlan -Level $Level
+    if ($script:AcceptanceProgressPlan.Count -le 1) { return }
+    Write-Host ""
+    Write-Host "=== $Level 验收计划：共 $($script:AcceptanceProgressPlan.Count) 步 ===" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $script:AcceptanceProgressPlan.Count; $i++) {
+        Write-Host ("  {0,2}. {1}" -f ($i + 1), $script:AcceptanceProgressPlan[$i][1])
+    }
+    Write-Host ""
+}
+
+function Write-AcceptanceProgressStart {
+    param([string]$Id, [string]$Label)
+    $step = Get-AcceptanceProgressStepIndex -PhaseId $Id
+    $total = $script:AcceptanceProgressPlan.Count
+    $elapsed = Format-AcceptanceDuration (Get-AcceptanceTotalElapsedSeconds)
+    if ($step -eq 0) {
+        Write-Host ">>> $Label | 总用时 $elapsed" -ForegroundColor Yellow
+        return
+    }
+    $remaining = [Math]::Max(0, $total - $step)
+    Write-Host "[$($script:AcceptanceProgressLevel) $step/$total] >>> $Label | 总用时 $elapsed | 剩余 $remaining 步" -ForegroundColor Green
+}
+
+function Write-AcceptanceProgressEnd {
+    param(
+        [string]$Id,
+        [string]$Label,
+        [int]$Seconds,
+        [bool]$Ok = $true,
+        [switch]$Skipped
+    )
+    $step = Get-AcceptanceProgressStepIndex -PhaseId $Id
+    $total = $script:AcceptanceProgressPlan.Count
+    $elapsed = Format-AcceptanceDuration (Get-AcceptanceTotalElapsedSeconds)
+    $dur = Format-AcceptanceDuration $Seconds
+    $status = if ($Skipped) { "未执行" } elseif ($Ok) { "通过" } else { "失败" }
+    if ($step -eq 0) {
+        Write-Host "<<< $Label $status $dur | 总用时 $elapsed" -ForegroundColor $(if ($Ok) { "Gray" } else { "Red" })
+        return
+    }
+    $remaining = [Math]::Max(0, $total - $step)
+    $color = if ($Skipped) { "DarkYellow" } elseif ($Ok) { "Gray" } else { "Red" }
+    Write-Host "[$($script:AcceptanceProgressLevel) $step/$total] <<< $Label $status $dur | 总用时 $elapsed | 剩余 $remaining 步" -ForegroundColor $color
+}
+
+function Write-AcceptanceProgressSkipBatch {
+    param([string]$Reason)
+    foreach ($pair in @(
+            @("s02_matrix", "S02 三模板矩阵"),
+            @("ci_gate", "CI 门禁"),
+            @("gitlab_publish", "GitLab 发帖（S02）"),
+            @("s06_incremental", "S06 增量评审"),
+            @("phase_c", "Phase C 抽检")
+        )) {
+        Write-AcceptanceProgressEnd -Id $pair[0] -Label $pair[1] -Seconds 0 -Ok $false -Skipped
+        Write-Host "    （跳过原因：$Reason）" -ForegroundColor DarkYellow
+    }
+}
 
 function Initialize-AcceptanceTiming {
     $script:AcceptanceTimingPhases = @()
@@ -81,6 +214,7 @@ function Start-AcceptanceTimingPhase {
     $script:AcceptanceTimingCurrent = @{ id = $Id; label = $Label }
     $script:AcceptanceTimingSw = [System.Diagnostics.Stopwatch]::StartNew()
     $script:AcceptanceTimingCurrent.started = (Get-Date).ToUniversalTime().ToString('o')
+    Write-AcceptanceProgressStart -Id $Id -Label $Label
 }
 
 function Add-TimingPhaseEntry {
@@ -132,6 +266,7 @@ function Stop-AcceptanceTimingPhase {
     $script:AcceptanceTimingPhases += $entry
     $script:AcceptanceTimingCurrent = $null
     $script:AcceptanceTimingSw = $null
+    Write-AcceptanceProgressEnd -Id $entry.id -Label $entry.label -Seconds $entry.seconds -Ok $Ok -Skipped:$Skipped
     return $entry
 }
 
@@ -148,6 +283,7 @@ function Add-SkippedTimingPhase {
 
 function Add-L3FullSkippedExtras {
     param([string]$Reason = "scenario_suite failed")
+    Write-AcceptanceProgressSkipBatch -Reason $Reason
     foreach ($pair in @(
             @("s02_matrix", "S02 三模板矩阵"),
             @("gitlab_publish", "GitLab 发帖（S02）"),
@@ -659,6 +795,28 @@ $l3Skipped = $false
 
 try {
 Initialize-AcceptanceTiming
+Initialize-AcceptanceProgress -Level $Level
+
+if ($Level -eq "L3-full") {
+    Import-AicrEnv
+    Write-Host ""
+    $preflightReport = Join-Path $RecordDir "preflight.json"
+    & $venvPy (Join-Path $ScriptDir "l3_full_preflight.py") `
+        --record-dir $RecordDir --report-json $preflightReport
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "L3-full 已中止：请按上方「需要您处理」逐项修复后重跑。" -ForegroundColor Red
+        exit 1
+    }
+    if (Test-Path $preflightReport) {
+        $pf = Get-Content $preflightReport -Raw | ConvertFrom-Json
+        if ($pf.infra_ready) {
+            $SkipGitlabCheck = $true
+            Write-Host "Preflight: GitLab 已就绪，L3 阶段跳过重复 ensure_gitlab" -ForegroundColor DarkGray
+        }
+    }
+    Write-Host ""
+}
 
 if (Should-Run "L1") {
     Write-Host "=== L1 smoke ==="
@@ -834,6 +992,10 @@ Write-JsonNoBom -Path (Join-Path $RecordDir "summary.json") -Object $summary
 }
 
 if ($failed) { exit 1 }
+$totalElapsed = Format-AcceptanceDuration (Get-AcceptanceTotalElapsedSeconds)
+$verdict = if ($failed) { "不通过" } else { "通过" }
+Write-Host ""
+Write-Host "=== 验收结束 === 结论: $verdict | 总用时 $totalElapsed | 报告: $RecordDir" -ForegroundColor $(if ($failed) { "Red" } else { "Green" })
 Write-Host "Done: $RecordDir"
 Write-Host "Chinese reports: l1-smoke.md, l2-health.md, l3.md, summary.zh.md"
 if ($Level -eq "L3-full") { Write-Host "Delivery report: release.zh.md" }
