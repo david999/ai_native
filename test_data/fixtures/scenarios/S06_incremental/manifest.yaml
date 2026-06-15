@@ -1,0 +1,8 @@
+id: S06_incremental
+title: 增量评审二次 commit（基于 S02 NPE）
+branch: aicr-test/S06_incremental
+incremental_only: true
+commit_message: "test(S06): incremental marker comment"
+files:
+  - dest: src/main/java/com/example/demo/service/UserService.java
+    source: files/UserService.java

@@ -85,13 +85,17 @@ if (-not $rdctl) {
 }
 
 Write-Host "Starting Rancher Desktop (background, moby, no k8s)..."
+$prevEa = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 & $rdctl start `
     --application.start-in-background `
     --container-engine.name=moby `
-    --kubernetes.enabled=false
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "rdctl start failed (exit $LASTEXITCODE)" -ForegroundColor Yellow
-    exit $LASTEXITCODE
+    --kubernetes.enabled=false 2>&1 | Out-Null
+$rdctlExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEa
+if ($rdctlExit -ne 0) {
+    Write-Host "rdctl start failed (exit $rdctlExit)" -ForegroundColor Yellow
+    exit $rdctlExit
 }
 
 Write-Host "Waiting for docker engine (up to $($MaxAttempts * $IntervalSeconds)s)..."

@@ -56,9 +56,13 @@ if ($NoStart) {
 }
 
 Write-Host "GitLab not reachable; invoking start_gitlab.ps1 ..."
+$prevEa = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 & $StartScript
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+$startExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEa
+if ($startExit -ne 0) {
+    exit $startExit
 }
 
 for ($i = 1; $i -le $MaxAttempts; $i++) {

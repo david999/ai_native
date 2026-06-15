@@ -37,7 +37,7 @@ pip install -r requirements.txt
 python scripts\smoke_test.py
 ```
 
-成功时最后一行输出：`All 78 smoke tests passed.`（数量以 `smoke_test.py` 内 `tests` 列表为准）。
+成功时最后一行输出：`All 80 smoke tests passed.`（数量以 `smoke_test.py` 内 `tests` 列表为准）。
 
 可选 JSON + 中文 Markdown：`python scripts/smoke_test.py --report-json ../test-results/l1-smoke.json`（同时生成 `l1-smoke.md`）
 
@@ -134,6 +134,13 @@ python scripts\smoke_test.py
 |------|------|
 | `test_prompt_matrix_template_ok` | 503 / fail-open / 成功完成 判定 |
 | `test_prompt_matrix_exit_code` | 全通过 exit 0；部分失败或无模板 exit 1 |
+
+### L3 交付验收脚本
+
+| 用例 | 说明 |
+|------|------|
+| `test_validate_scenario` | 分数区间、关键词、变更文件硬命中、S01 relax_score |
+| `test_assert_gitlab_publish` | AICR 摘要 note 识别（收紧 marker） |
 
 ### LLM 工厂
 

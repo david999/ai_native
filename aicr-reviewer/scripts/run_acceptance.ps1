@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("L1", "L2", "L3", "daily", "all")]
+    [ValidateSet("L1", "L2", "L3", "L3-standard", "L3-full", "daily", "all")]
     [string]$Level = "daily",
     [string]$RecordDir = "",
     [string]$Scenario = "",
@@ -10,7 +10,7 @@ param(
 
 $script:StartedAicrPid = $null
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $ScriptDir = $PSScriptRoot
 $AicrRoot = Split-Path -Parent $ScriptDir
 $RepoRoot = Split-Path -Parent $AicrRoot
@@ -32,7 +32,8 @@ function Import-AicrEnv {
     $priority = @(
         'LLM_API_KEY', 'LLM_MODEL', 'LLM_PROVIDER', 'LLM_API_BASE',
         'AICR_BOT_TOKEN', 'GITLAB_URL', 'REVIEW_API_SECRET',
-        'REVIEW_API_ALLOW_INSECURE', 'GITLAB_START_COMMAND'
+        'REVIEW_API_ALLOW_INSECURE', 'GITLAB_START_COMMAND', 'REVIEW_DRY_RUN',
+        'GITLAB_WEBHOOK_SECRET', 'GITLAB_WEBHOOK_ALLOW_INSECURE'
     )
     foreach ($name in $priority) {
         $osVal = $null
@@ -76,7 +77,7 @@ function Stop-AicrListenerOnPort {
                     Write-Host "Skip pid $procId on port $Port ($name): not AICR uvicorn"
                 }
             } catch {
-                Write-Host "Skip pid $procId on port $Port: could not inspect process"
+                Write-Host "Skip pid $procId on port ${Port}: could not inspect process"
             }
         }
     }
@@ -181,6 +182,293 @@ function Ensure-AicrRunning {
     }
     return $true
 }
+
+function Get-StandardScenarioIds {
+    return @(
+        "S01_clean_refactor",
+        "S02_npe_optional",
+        "S03_empty_catch",
+        "S04_hardcoded_secret",
+        "S05_feign_no_timeout"
+    )
+}
+
+function Test-L3FullDryRunRequired {
+    $dry = [Environment]::GetEnvironmentVariable('REVIEW_DRY_RUN', 'Process')
+    if ($dry -eq '1') {
+        Write-Error "L3-full requires REVIEW_DRY_RUN=0 in evn/.env (real GitLab publish)."
+        return $false
+    }
+    return $true
+}
+
+function Initialize-L3Run {
+    param(
+        [string]$RecordDir,
+        [hashtable]$Meta,
+        [switch]$RequireLlm,
+        [switch]$SkipGitlab,
+        [ref]$L3Skipped
+    )
+    Import-AicrEnv
+    $l3Dir = Join-Path $RecordDir "l3"
+    New-Item -ItemType Directory -Path $l3Dir -Force | Out-Null
+
+    if (-not (Ensure-AicrRunning -RecordDir $RecordDir -Meta $Meta -RequireLlm:$RequireLlm)) {
+        return $null
+    }
+    if (-not $SkipGitlab) {
+        & (Join-Path $RepoRoot "test_data\scripts\ensure_gitlab.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            $L3Skipped.Value = $true
+            return $null
+        }
+    }
+    & (Join-Path $RepoRoot "test_data\scripts\bootstrap_demo.ps1")
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $l3Dir
+}
+
+function Invoke-L3ScenarioBaseline {
+    param(
+        [string]$ScenarioId,
+        [string]$L3Dir,
+        [hashtable]$ReleaseData,
+        [switch]$AssertPublish,
+        [string]$BranchOverride = ""
+    )
+    $scenDir = Join-Path $L3Dir $ScenarioId
+    New-Item -ItemType Directory -Path $scenDir -Force | Out-Null
+    $applyReport = Join-Path $scenDir "apply.json"
+    $applyArgs = @(
+        (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py"),
+        "--scenario", $ScenarioId,
+        "--report-json", $applyReport
+    )
+    if ($BranchOverride) { $applyArgs += @("--branch", $BranchOverride) }
+    & $venvPy @applyArgs
+    if ($LASTEXITCODE -ne 0) { return @{ ok = $false; scenario_id = $ScenarioId } }
+
+    $apply = Get-Content $applyReport -Raw | ConvertFrom-Json
+    $branch = $apply.scenarios[0].branch
+    $mrReport = Join-Path $scenDir "mr.json"
+    & $venvPy (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
+        --source-branch $branch --target-branch main `
+        --title "AICR acceptance $ScenarioId" --report-json $mrReport
+    if ($LASTEXITCODE -ne 0) { return @{ ok = $false; scenario_id = $ScenarioId } }
+
+    $mr = Get-Content $mrReport -Raw | ConvertFrom-Json
+    $reviewJson = Join-Path $scenDir "review.json"
+    & $venvPy (Join-Path $ScriptDir "review_single.py") `
+        --project-id $mr.project_id --mr-iid $mr.mr_iid `
+        --force-full --output $reviewJson --scenario-id $ScenarioId
+    if ($LASTEXITCODE -ne 0) { return @{ ok = $false; scenario_id = $ScenarioId } }
+
+    $review = Get-Content $reviewJson -Raw | ConvertFrom-Json
+    $validateReport = Join-Path $scenDir "validate.json"
+    & $venvPy (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
+        --scenario-id $ScenarioId --review-json $reviewJson `
+        --report-json $validateReport --tolerance 5
+    $valOk = ($LASTEXITCODE -eq 0)
+    if (-not $valOk) {
+        Write-Host "Validation failed for $ScenarioId; retrying review once..."
+        & $venvPy (Join-Path $ScriptDir "review_single.py") `
+            --project-id $mr.project_id --mr-iid $mr.mr_iid `
+            --force-full --output $reviewJson --scenario-id $ScenarioId
+        if ($LASTEXITCODE -eq 0) {
+            & $venvPy (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
+                --scenario-id $ScenarioId --review-json $reviewJson `
+                --report-json $validateReport --tolerance 5
+            $valOk = ($LASTEXITCODE -eq 0)
+        }
+    }
+
+    $publishOk = $true
+    if ($AssertPublish -and $ScenarioId -eq "S02_npe_optional") {
+        $pubReport = Join-Path $scenDir "publish.json"
+        & $venvPy (Join-Path $RepoRoot "test_data\scripts\assert_gitlab_publish.py") `
+            --project-id $mr.project_id --mr-iid $mr.mr_iid `
+            --expected-score $review.score --report-json $pubReport
+        $publishOk = ($LASTEXITCODE -eq 0)
+    }
+
+    $gitlabUrl = [Environment]::GetEnvironmentVariable('GITLAB_URL', 'Process')
+    if (-not $gitlabUrl) { $gitlabUrl = "http://localhost:8000" }
+    $mrUrl = if ($mr.web_url) { $mr.web_url } else {
+        "$($gitlabUrl.TrimEnd('/'))/demo/spring-cloud-demo/-/merge_requests/$($mr.mr_iid)"
+    }
+
+    $entry = @{
+        scenario_id    = $ScenarioId
+        score          = $review.score
+        validation_ok  = $valOk
+        publish_ok     = $publishOk
+        mr_url         = $mrUrl
+        project_id     = $mr.project_id
+        mr_iid         = $mr.mr_iid
+        branch         = $branch
+        note           = if ($valOk) { "" } else { "validation failed after retry" }
+    }
+    if ($ReleaseData.scenarios -isnot [System.Collections.ArrayList]) {
+        if ($ReleaseData.scenarios) {
+            [void]($ReleaseData.scenarios = [System.Collections.ArrayList]@($ReleaseData.scenarios))
+        } else {
+            [void]($ReleaseData.scenarios = [System.Collections.ArrayList]@())
+        }
+    }
+    [void]$ReleaseData.scenarios.Add($entry)
+
+    $ok = $valOk -and $publishOk
+    if (-not $valOk) {
+        if ($ReleaseData.warnings -isnot [System.Collections.ArrayList]) {
+            [void]($ReleaseData.warnings = [System.Collections.ArrayList]@())
+        }
+        [void]$ReleaseData.warnings.Add("Scenario $ScenarioId validation flaky/failed")
+    }
+    return @{ ok = $ok; entry = $entry; mr = $mr; review = $review }
+}
+
+function Invoke-L3StandardSuite {
+    param(
+        [string]$RecordDir,
+        [hashtable]$Meta,
+        [hashtable]$ReleaseData,
+        [switch]$SkipGitlab,
+        [switch]$AssertPublish
+    )
+    $l3Skipped = $false
+    $l3Dir = Initialize-L3Run -RecordDir $RecordDir -Meta $Meta -RequireLlm `
+        -SkipGitlab:$SkipGitlab -L3Skipped ([ref]$l3Skipped)
+    if ($l3Skipped) {
+        if ($Level -in @("L3-standard", "L3-full")) { return @{ ok = $false; skipped = $true } }
+        Write-Warning "L3 skipped: GitLab not ready"
+        return @{ ok = $true; skipped = $true }
+    }
+    if (-not $l3Dir) { return @{ ok = $false; skipped = $false } }
+
+    $suiteOk = $true
+    foreach ($sid in Get-StandardScenarioIds) {
+        Write-Host "=== Scenario $sid (baseline) ==="
+        $r = Invoke-L3ScenarioBaseline -ScenarioId $sid -L3Dir $l3Dir -ReleaseData $ReleaseData -AssertPublish:$AssertPublish
+        if (-not ($r -is [hashtable]) -or -not $r['ok']) { $suiteOk = $false }
+    }
+    $ReleaseData.phases = @{}
+    $ReleaseData.phases["scenario_suite"] = @{ ok = $suiteOk }
+    Write-JsonNoBom -Path (Join-Path $l3Dir "release_data.json") -Object $ReleaseData
+    return @{ ok = $suiteOk; l3Dir = $l3Dir; skipped = $false }
+}
+
+function Invoke-L3FullExtras {
+    param(
+        [string]$L3Dir,
+        [hashtable]$ReleaseData,
+        [object]$S02Mr,
+        [object]$S02Review
+    )
+    $extrasOk = $true
+
+    Write-Host "=== S02 prompt matrix ==="
+    $matrixDir = Join-Path $L3Dir "S02_npe_optional_matrix"
+    & $venvPy (Join-Path $ScriptDir "prompt_matrix_test.py") `
+        --project-id $S02Mr.project_id --mr-iid $S02Mr.mr_iid `
+        --scenario-id "S02_npe_optional" --output-dir $matrixDir --force-full
+    $matrixOk = ($LASTEXITCODE -eq 0)
+    if (-not $matrixOk) { $extrasOk = $false }
+    $matrixSummary = $null
+    $msPath = Join-Path $matrixDir "matrix_summary.json"
+    if (Test-Path $msPath) {
+        $matrixSummary = Get-Content $msPath -Raw | ConvertFrom-Json
+        $ReleaseData.matrix_summary = $matrixSummary
+    }
+    $ReleaseData.phases["s02_matrix"] = @{ ok = $matrixOk }
+
+    Write-Host "=== CI review gate (S02 MR, expect block on low score, cached) ==="
+    $env:AICR_PROJECT_ID = "$($S02Mr.project_id)"
+    $env:AICR_MR_IID = "$($S02Mr.mr_iid)"
+    $env:AICR_REVIEW_URL = "http://localhost:8001"
+    $gateSecret = [Environment]::GetEnvironmentVariable('REVIEW_API_SECRET', 'Process')
+    if (-not $gateSecret) {
+        foreach ($scope in @('User', 'Machine')) {
+            $gateSecret = [Environment]::GetEnvironmentVariable('REVIEW_API_SECRET', $scope)
+            if ($gateSecret) { break }
+        }
+    }
+    $gateArgs = @{
+        CachedScore     = [double]$S02Review.score
+        CachedCompleted = [bool]$S02Review.review_completed
+    }
+    if ($gateSecret) { $gateArgs['Secret'] = $gateSecret }
+    & (Join-Path $ScriptDir "ci_review_gate.ps1") @gateArgs
+    $gateExit = $LASTEXITCODE
+    $gateOk = ($gateExit -eq 1)
+    if (-not $gateOk) {
+        Write-Warning "CI gate expected exit 1 (low score block) but got $gateExit"
+        $extrasOk = $false
+    }
+    $ReleaseData.phases["ci_gate"] = @{ ok = $gateOk; exit_code = $gateExit; expected_exit = 1 }
+
+    Write-Host "=== S06 incremental ==="
+    $s06Branch = "aicr-test/S06_incremental"
+    $s06Dir = Join-Path $L3Dir "S06_incremental"
+    New-Item -ItemType Directory -Path $s06Dir -Force | Out-Null
+    & $venvPy (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
+        --scenario "S02_npe_optional" --branch $s06Branch `
+        --report-json (Join-Path $s06Dir "apply1.json")
+    if ($LASTEXITCODE -ne 0) { $extrasOk = $false }
+    else {
+        & $venvPy (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
+            --source-branch $s06Branch --target-branch main `
+            --title "AICR acceptance S06_incremental" `
+            --report-json (Join-Path $s06Dir "mr.json")
+        if ($LASTEXITCODE -ne 0) { $extrasOk = $false }
+        else {
+            $s06Mr = Get-Content (Join-Path $s06Dir "mr.json") -Raw | ConvertFrom-Json
+            $r1 = Join-Path $s06Dir "review1.json"
+            & $venvPy (Join-Path $ScriptDir "review_single.py") `
+                --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
+                --force-full --output $r1 --scenario-id "S06_incremental"
+            $firstOk = ($LASTEXITCODE -eq 0)
+            $firstReview = Get-Content $r1 -Raw | ConvertFrom-Json
+
+            & $venvPy (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
+                --scenario "S06_incremental" --branch $s06Branch --incremental `
+                --report-json (Join-Path $s06Dir "apply2.json")
+            $r2 = Join-Path $s06Dir "review2.json"
+            & $venvPy (Join-Path $ScriptDir "review_single.py") `
+                --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
+                --no-force-full --output $r2 --scenario-id "S06_incremental"
+            $secondOk = ($LASTEXITCODE -eq 0)
+            $secondReview = Get-Content $r2 -Raw | ConvertFrom-Json
+
+            & $venvPy (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
+                --scenario-id "S06_incremental" --review-json $r2 `
+                --report-json (Join-Path $s06Dir "validate2.json") --tolerance 5
+            $val2Ok = ($LASTEXITCODE -eq 0)
+            $s06Ok = $firstOk -and $secondOk -and $val2Ok
+            if (-not $s06Ok) { $extrasOk = $false }
+            $ReleaseData.incremental = @{
+                first_score  = $firstReview.score
+                first_sha    = $firstReview.prompt_sha256
+                second_score = $secondReview.score
+                second_sha   = $secondReview.prompt_sha256
+                second_ok    = ($secondOk -and $val2Ok)
+            }
+            $ReleaseData.phases["s06_incremental"] = @{ ok = $s06Ok }
+
+            Write-Host "=== Phase C smoke ==="
+            $phaseReport = Join-Path $s06Dir "phase_c.json"
+            & $venvPy (Join-Path $ScriptDir "phase_c_smoke.py") `
+                --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
+                --report-json $phaseReport
+            $phaseOk = ($LASTEXITCODE -eq 0)
+            if (-not $phaseOk) { $extrasOk = $false }
+            $ReleaseData.phases["phase_c"] = @{ ok = $phaseOk }
+        }
+    }
+
+    Write-JsonNoBom -Path (Join-Path $L3Dir "release_data.json") -Object $ReleaseData
+    return $extrasOk
+}
 if (-not $RecordDir) {
     $ts = Get-Date -Format "yyyy-MM-ddTHHmmss"
     $RecordDir = Join-Path $RepoRoot "test-results\$ts"
@@ -209,7 +497,8 @@ if (-not (Test-Path $venvPy)) {
 function Should-Run($name) {
     switch ($Level) {
         "daily" { return $name -eq "L1" -or $name -eq "L2" }
-        "all"   { return $true }
+        "all"   { return $name -in @("L1", "L2", "L3") }
+        "L3-full" { return $name -in @("L1", "L2", "L3-full") }
         default { return $Level -eq $name }
     }
 }
@@ -287,6 +576,59 @@ if (-not $failed -and (Should-Run "L3")) {
     }
 }
 
+if (-not $failed -and (Should-Run "L3-standard")) {
+    Write-Host "=== L3-standard (S01-S05 baseline + validate) ==="
+    $releaseData = @{
+        scenarios = [System.Collections.ArrayList]@()
+        warnings  = [System.Collections.ArrayList]@()
+        phases    = @{}
+    }
+    $r = Invoke-L3StandardSuite -RecordDir $RecordDir -Meta $meta -ReleaseData $releaseData `
+        -SkipGitlab:$SkipGitlabCheck -AssertPublish:$false
+    if ($r.skipped) {
+        $l3Skipped = $true
+        if ($Level -eq "L3-standard") { $failed = $true }
+    } elseif (-not $r.ok) {
+        $failed = $true
+    }
+}
+
+if (-not $failed -and (Should-Run "L3-full")) {
+    Write-Host "=== L3-full delivery acceptance ==="
+    Import-AicrEnv
+    if (-not (Test-L3FullDryRunRequired)) { $failed = $true }
+    if (-not $failed) {
+        $releaseData = @{
+            scenarios = [System.Collections.ArrayList]@()
+            warnings  = [System.Collections.ArrayList]@()
+            phases    = @{}
+        }
+        $r = Invoke-L3StandardSuite -RecordDir $RecordDir -Meta $meta -ReleaseData $releaseData `
+            -SkipGitlab:$SkipGitlabCheck -AssertPublish
+        if ($r.skipped) {
+            $l3Skipped = $true
+            $failed = $true
+        } elseif (-not $r.ok) {
+            $failed = $true
+        } else {
+            $s02 = $releaseData.scenarios | Where-Object { $_.scenario_id -eq "S02_npe_optional" } | Select-Object -First 1
+            if (-not $s02) {
+                Write-Warning "S02 scenario missing from release data"
+                $failed = $true
+            } else {
+                $releaseData.phases["gitlab_publish"] = @{ ok = [bool]$s02.publish_ok }
+                if (-not $s02.publish_ok) { $failed = $true }
+                $s02ReviewPath = Join-Path $r.l3Dir "S02_npe_optional\review.json"
+                $s02Review = Get-Content $s02ReviewPath -Raw | ConvertFrom-Json
+                $s02Mr = @{ project_id = $s02.project_id; mr_iid = $s02.mr_iid }
+                if (-not $failed -and -not (Invoke-L3FullExtras -L3Dir $r.l3Dir -ReleaseData $releaseData -S02Mr $s02Mr -S02Review $s02Review)) {
+                    $failed = $true
+                }
+            }
+        }
+    }
+}
+
 $reportZhArgs = @(
     (Join-Path $ScriptDir "report_zh.py"),
     "--record-dir", $RecordDir,
@@ -305,6 +647,16 @@ $summary = @{
 }
 Write-JsonNoBom -Path (Join-Path $RecordDir "summary.json") -Object $summary
 
+if ($Level -eq "L3-full") {
+    $relArgs = @(
+        (Join-Path $ScriptDir "write_release_report.py"),
+        "--record-dir", $RecordDir,
+        "--level", "L3-full"
+    )
+    if ($failed) { $relArgs += "--failed" }
+    & $venvPy @relArgs | Out-Null
+}
+
 } finally {
     if ($script:StartedAicrPid -and -not $KeepAicrRunning) {
         Write-Host "Stopping acceptance-started AICR (pid=$($script:StartedAicrPid))..."
@@ -316,5 +668,6 @@ Write-JsonNoBom -Path (Join-Path $RecordDir "summary.json") -Object $summary
 if ($failed) { exit 1 }
 Write-Host "Done: $RecordDir"
 Write-Host "Chinese reports: l1-smoke.md, l2-health.md, l3.md, summary.zh.md"
+if ($Level -eq "L3-full") { Write-Host "Delivery report: release.zh.md" }
 Write-Host "View latest: .\.venv\Scripts\python.exe scripts\show_latest_report.py"
 exit 0

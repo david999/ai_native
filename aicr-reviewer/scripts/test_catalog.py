@@ -82,6 +82,8 @@ SMOKE_TEST_ZH: dict[str, tuple[str, str]] = {
     "test_llm_factory_missing_key": ("LLM", "未配置 LLM_API_KEY 时工厂抛错"),
     "test_prompt_matrix_template_ok": ("L3 矩阵", "template_ok 判定 503/fail-open/成功"),
     "test_prompt_matrix_exit_code": ("L3 矩阵", "prompt_matrix_test 矩阵失败 exit 1、全通过 exit 0"),
+    "test_validate_scenario": ("L3 验收", "validate_scenario 分数/关键词/文件命中"),
+    "test_assert_gitlab_publish": ("L3 验收", "assert_gitlab_publish AICR note 识别"),
 }
 
 L1_REPORT_TITLE_ZH = "L1 冒烟测试报告"

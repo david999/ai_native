@@ -4,6 +4,20 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $DemoDir = Join-Path $RepoRoot "test_data\spring-cloud-demo"
 $GitLabUrl = if ($env:GITLAB_URL) { $env:GITLAB_URL } else { "http://localhost:8000" }
 
+function Format-RemoteForLog {
+    param([string]$Url)
+    if (-not $Url) { return $Url }
+    if ($Url -match '^https?://([^/@]+)(?::([^/@]+))?@(.+)$') {
+        $user = $matches[1]
+        $hostPart = $matches[3]
+        if ($matches[2]) {
+            return "${user}:***@${hostPart}"
+        }
+        return "${user}@${hostPart}"
+    }
+    return $Url
+}
+
 if (-not (Test-Path $DemoDir)) {
     throw "spring-cloud-demo not found at $DemoDir — clone from $GitLabUrl first"
 }
@@ -13,9 +27,9 @@ try {
     $remote = (git remote get-url origin 2>$null)
     if (-not $remote) { throw "No git remote 'origin' in spring-cloud-demo" }
     if ($remote -notmatch "localhost:8000" -and $remote -notmatch ":8000") {
-        Write-Warning "origin may not point to local GitLab: $remote"
+        Write-Warning "origin may not point to local GitLab: $(Format-RemoteForLog $remote)"
     }
-    Write-Host "OK demo remote: $remote"
+    Write-Host "OK demo remote: $(Format-RemoteForLog $remote)"
 
     $base = git rev-parse --verify aicr-test-base 2>$null
     if (-not $base) {

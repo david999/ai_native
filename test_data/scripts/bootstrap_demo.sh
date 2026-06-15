@@ -18,9 +18,25 @@ if [[ -z "$remote" ]]; then
   exit 1
 fi
 if [[ "$remote" != *":8000"* && "$remote" != *"localhost:8000"* ]]; then
-  echo "Warning: origin may not point to local GitLab: $remote"
+  safe_remote="$remote"
+  if [[ "$remote" =~ ^https?://([^/@]+)(:([^/@]+))?@(.+)$ ]]; then
+    if [[ -n "${BASH_REMATCH[3]:-}" ]]; then
+      safe_remote="${BASH_REMATCH[1]}:***@${BASH_REMATCH[4]}"
+    else
+      safe_remote="${BASH_REMATCH[1]}@${BASH_REMATCH[4]}"
+    fi
+  fi
+  echo "Warning: origin may not point to local GitLab: $safe_remote"
 fi
-echo "OK demo remote: $remote"
+safe_remote="$remote"
+if [[ "$remote" =~ ^https?://([^/@]+)(:([^/@]+))?@(.+)$ ]]; then
+  if [[ -n "${BASH_REMATCH[3]:-}" ]]; then
+    safe_remote="${BASH_REMATCH[1]}:***@${BASH_REMATCH[4]}"
+  else
+    safe_remote="${BASH_REMATCH[1]}@${BASH_REMATCH[4]}"
+  fi
+fi
+echo "OK demo remote: $safe_remote"
 
 if git rev-parse --verify aicr-test-base >/dev/null 2>&1; then
   echo "OK baseline branch aicr-test-base exists"

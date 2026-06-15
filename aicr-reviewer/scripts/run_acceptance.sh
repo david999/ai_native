@@ -22,7 +22,8 @@ PY=".venv/bin/python"
 should_run() {
   case "$LEVEL" in
     daily) [[ "$1" == "L1" || "$1" == "L2" ]] ;;
-    all) return 0 ;;
+    all) [[ "$1" == "L1" || "$1" == "L2" || "$1" == "L3" ]] ;;
+    L3-full) [[ "$1" == "L1" || "$1" == "L2" || "$1" == "L3-full" ]] ;;
     *) [[ "$LEVEL" == "$1" ]] ;;
   esac
 }
@@ -115,13 +116,58 @@ if should_run L3; then
   fi
 fi
 
+run_l3_orchestrator() {
+  local mode="$1"
+  mkdir -p "$RECORD_DIR/l3"
+  if ! ensure_aicr_for_l3; then
+    return 1
+  fi
+  if ! bash "$REPO_ROOT/test_data/scripts/ensure_gitlab.sh"; then
+    L3_SKIPPED=1
+    return 1
+  fi
+  bash "$REPO_ROOT/test_data/scripts/bootstrap_demo.sh"
+  if ! "$PY" scripts/l3_release_orchestrator.py --record-dir "$RECORD_DIR" --mode "$mode"; then
+    return 1
+  fi
+  return 0
+}
+
+if [[ "$FAILED" -eq 0 ]] && should_run L3-standard; then
+  echo "=== L3-standard (S01-S05 baseline + validate) ==="
+  if ! run_l3_orchestrator standard; then
+    if [[ "$LEVEL" == "L3-standard" ]]; then
+      FAILED=1
+    elif [[ "$L3_SKIPPED" -eq 1 ]]; then
+      echo "L3-standard skipped: GitLab not ready"
+    else
+      FAILED=1
+    fi
+  fi
+fi
+
+if [[ "$FAILED" -eq 0 ]] && should_run L3-full; then
+  echo "=== L3-full delivery acceptance ==="
+  if ! run_l3_orchestrator full; then
+    FAILED=1
+  fi
+fi
+
 ARGS=(scripts/report_zh.py --record-dir "$RECORD_DIR" --level "$LEVEL")
 [[ "$FAILED" -eq 1 ]] && ARGS+=(--failed)
 "$PY" "${ARGS[@]}"
 
+FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 cat >"$RECORD_DIR/summary.json" <<EOF
-{"level":"$LEVEL","record_dir":"$RECORD_DIR","failed":$FAILED,"l3_skipped":$L3_SKIPPED}
+{"level":"$LEVEL","record_dir":"$RECORD_DIR","failed":$FAILED,"l3_skipped":$L3_SKIPPED,"finished":"$FINISHED"}
 EOF
+
+if [[ "$LEVEL" == "L3-full" ]]; then
+  REL=(scripts/write_release_report.py --record-dir "$RECORD_DIR" --level L3-full)
+  [[ "$FAILED" -eq 1 ]] && REL+=(--failed)
+  "$PY" "${REL[@]}"
+fi
+
 echo "Done: $RECORD_DIR"
 [[ "$FAILED" -eq 1 ]] && exit 1
 exit 0

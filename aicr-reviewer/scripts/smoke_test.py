@@ -1552,6 +1552,66 @@ def test_prompt_matrix_exit_code():
     print("OK prompt matrix exit code")
 
 
+def test_validate_scenario():
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    scripts = repo / "test_data" / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from validate_scenario import validate_scenario_result
+
+    ok_review = {
+        "review_completed": True,
+        "score": 40,
+        "summary": "Optional.orElse(null) may cause NPE",
+        "issues": [{"file": "src/main/java/demo/UserService.java", "message": "null risk"}],
+    }
+    r = validate_scenario_result("S02_npe_optional", ok_review, tolerance=5.0)
+    assert r["ok"], r["errors"]
+
+    bad_score = dict(ok_review, score=90)
+    r2 = validate_scenario_result("S02_npe_optional", bad_score, tolerance=5.0)
+    assert not r2["ok"]
+    assert any("outside" in e for e in r2["errors"])
+
+    no_kw = dict(ok_review, summary="generic issue", issues=[])
+    r3 = validate_scenario_result("S02_npe_optional", no_kw, tolerance=5.0)
+    assert not r3["ok"]
+
+    wrong_file = dict(ok_review, issues=[{"file": "other/Foo.java", "message": "null Optional"}])
+    r4 = validate_scenario_result("S02_npe_optional", wrong_file, tolerance=5.0)
+    assert not r4["ok"]
+    assert any("changed files" in e for e in r4["errors"])
+
+    s01_low = {"review_completed": True, "score": 10, "summary": "ok refactor", "issues": []}
+    r5 = validate_scenario_result("S01_clean_refactor", s01_low, tolerance=5.0)
+    assert r5["ok"], r5["errors"]
+    assert any("outside" in w for w in r5["warnings"])
+    print("OK validate_scenario")
+
+
+def test_assert_gitlab_publish():
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    scripts = repo / "test_data" / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from assert_gitlab_publish import find_aicr_notes, note_looks_like_aicr
+
+    assert note_looks_like_aicr("AICR summary score: 60", 60.0)
+    assert note_looks_like_aicr("## AICR Review Summary\nScore: 55")
+    assert not note_looks_like_aicr("LGTM")
+    assert not note_looks_like_aicr("mention aicr in passing without review context")
+    notes = [{"body": "AICR summary score: 60"}]
+    hits = find_aicr_notes(notes, 60.0)
+    assert len(hits) == 1
+    print("OK assert_gitlab_publish")
+
+
 def _write_smoke_report(path, run_id, entries, failed, total):
     import json
     from pathlib import Path
@@ -1676,6 +1736,8 @@ if __name__ == "__main__":
         test_llm_factory_missing_key,
         test_prompt_matrix_template_ok,
         test_prompt_matrix_exit_code,
+        test_validate_scenario,
+        test_assert_gitlab_publish,
     ]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     entries = []

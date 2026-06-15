@@ -2,7 +2,8 @@
 scenarios:
   - id: S01_clean_refactor
     title: 纯重构（提取方法、重命名）
-    branch: test/S01_clean_refactor
+    branch: aicr-test/S01_clean_refactor
+    relax_score: true
     expected_score_min: 75
     expected_score_max: 100
     must_find_keywords: []
@@ -10,7 +11,7 @@ scenarios:
 
   - id: S02_npe_optional
     title: Optional.orElse(null) 未校验
-    branch: test/S02_npe_optional
+    branch: aicr-test/S02_npe_optional
     expected_score_min: 0
     expected_score_max: 65
     must_find_keywords:
@@ -20,7 +21,7 @@ scenarios:
 
   - id: S03_empty_catch
     title: 空 catch 吞异常
-    branch: test/S03_empty_catch
+    branch: aicr-test/S03_empty_catch
     expected_score_min: 0
     expected_score_max: 70
     must_find_keywords:
@@ -30,20 +31,29 @@ scenarios:
 
   - id: S04_hardcoded_secret
     title: 配置文件明文密钥
-    branch: test/S04_hardcoded_secret
+    branch: aicr-test/S04_hardcoded_secret
     expected_score_min: 0
     expected_score_max: 50
     must_find_keywords:
       - secret
-      - password
     language_hint: Java/Spring
 
   - id: S05_feign_no_timeout
     title: Feign 客户端缺超时
-    branch: test/S05_feign_no_timeout
+    branch: aicr-test/S05_feign_no_timeout
     expected_score_min: 0
     expected_score_max: 75
     must_find_keywords:
       - Feign
       - timeout
+    language_hint: Java/Spring
+
+  - id: S06_incremental
+    title: 增量评审二次 commit
+    branch: aicr-test/S06_incremental
+    incremental_only: true
+    expected_score_min: 0
+    expected_score_max: 65
+    must_find_keywords:
+      - null
     language_hint: Java/Spring

@@ -9,10 +9,13 @@ test_data/
 ├── spring-cloud-demo/          # 业务仓（自有 .git，clone 自本地 GitLab）
 ├── fixtures/scenarios/         # 固定测试场景（纳入 monorepo）
 │   ├── manifest.yaml
-│   ├── S01_clean_refactor/
+│   ├── S05_feign_no_timeout/
+│   ├── S06_incremental/        # 增量评审（incremental_only）
 │   └── ...
-└── scripts/                    # 场景应用、MR、触发评审
-    ├── apply_scenario.py
+└── scripts/                    # 场景应用、MR、校验
+    ├── apply_scenario.py       # --incremental / --include-incremental
+    ├── validate_scenario.py    # 分数±5、关键词、文件命中
+    ├── assert_gitlab_publish.py
     ├── bootstrap_demo.ps1
     ├── ensure_gitlab.ps1
     └── ...
