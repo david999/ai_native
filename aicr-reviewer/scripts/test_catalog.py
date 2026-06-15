@@ -84,6 +84,7 @@ SMOKE_TEST_ZH: dict[str, tuple[str, str]] = {
     "test_prompt_matrix_exit_code": ("L3 矩阵", "prompt_matrix_test 矩阵失败 exit 1、全通过 exit 0"),
     "test_validate_scenario": ("L3 验收", "validate_scenario 分数/关键词/文件命中"),
     "test_assert_gitlab_publish": ("L3 验收", "assert_gitlab_publish AICR note 识别"),
+    "test_acceptance_timing": ("L3 验收", "acceptance_timing 耗时格式化与 timing.json"),
 }
 
 L1_REPORT_TITLE_ZH = "L1 冒烟测试报告"

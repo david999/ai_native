@@ -256,9 +256,42 @@ def write_l3_md(record_dir: Path, md_path: Path | None = None) -> str | None:
 def write_acceptance_summary_zh(record_dir: Path, *, level: str, failed: bool) -> None:
     l3_summary_lines: list[str] = []
     l3_dir = record_dir / "l3"
+    release_data = _read_json(l3_dir / "release_data.json") if l3_dir.is_dir() else None
+
+    if level == "L3-full":
+        release_md = record_dir / "release.zh.md"
+        if release_md.is_file():
+            l3_summary_lines.append(
+                f"- **完整签收报告**：[`release.zh.md`](release.zh.md)"
+            )
+        timing = _read_json(record_dir / "timing.json")
+        if timing and timing.get("total_seconds") is not None:
+            from acceptance_timing import format_duration
+
+            l3_summary_lines.append(
+                f"- 总耗时：**{format_duration(timing['total_seconds'])}**（详见 `timing.json`）"
+            )
+        if isinstance(release_data, dict):
+            phases = release_data.get("phases") or {}
+            suite = phases.get("scenario_suite")
+            if suite is not None:
+                l3_summary_lines.append(
+                    f"- 场景套件 S01–S05：**{'通过' if suite.get('ok') else '失败'}**"
+                )
+            scenarios = release_data.get("scenarios") or []
+            failed_scenarios = [
+                s.get("scenario_id", "")
+                for s in scenarios
+                if not s.get("validation_ok", True) or s.get("publish_ok") is False
+            ]
+            if failed_scenarios:
+                l3_summary_lines.append(
+                    f"- 失败场景：{', '.join(f'`{x}`' for x in failed_scenarios)}"
+                )
+
     if l3_dir.is_dir():
         matrix_rows = _collect_l3_matrix_summaries(l3_dir)
-        if matrix_rows:
+        if matrix_rows and level != "L3-full":
             total_pass = sum(s.get("passed", 0) for _, s in matrix_rows)
             total_fail = sum(s.get("failed", 0) for _, s in matrix_rows)
             all_ok = all(s.get("ok", s.get("failed", 1) == 0) for _, s in matrix_rows)
@@ -299,10 +332,14 @@ def write_acceptance_summary_zh(record_dir: Path, *, level: str, failed: bool) -
             "",
             "| 文件 | 说明 |",
             "|------|------|",
+            "| `release.zh.md` | L3-full 交付签收（门禁、耗时、场景明细） |",
+            "| `timing.json` | 各阶段耗时（机器可读） |",
             "| `l1-smoke.md` | L1 冒烟用例中文明细 |",
             "| `l2-health.md` | L2 健康检查中文说明 |",
             "| `l3.md` | L3 场景、MR、多模板评审详情（中文） |",
             "| `l3/<场景>/comparison.md` | 模板对比表（英文表头） |",
+            "",
+            "**阅读顺序（L3-full）**：`release.zh.md` → `timing.json` → `summary.zh.md`（本页）→ 各场景 `l3/<id>/validate.json`。",
             "",
             "`test-results/` 已 gitignore；含 LLM 评审结论时勿提交仓库。",
             "",

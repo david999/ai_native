@@ -57,7 +57,123 @@ function Import-AicrEnv {
 
 function Write-JsonNoBom {
     param([string]$Path, [object]$Object)
-    [System.IO.File]::WriteAllText($Path, ($Object | ConvertTo-Json), $Utf8NoBom)
+    [System.IO.File]::WriteAllText($Path, ($Object | ConvertTo-Json -Depth 10), $Utf8NoBom)
+}
+
+$script:AcceptanceTimingPhases = @()
+$script:AcceptanceTimingStart = $null
+$script:AcceptanceTimingCurrent = $null
+$script:AcceptanceTimingSw = $null
+
+function Initialize-AcceptanceTiming {
+    $script:AcceptanceTimingPhases = @()
+    $script:AcceptanceTimingStart = (Get-Date).ToUniversalTime()
+    $script:AcceptanceTimingCurrent = $null
+    $script:AcceptanceTimingSw = $null
+}
+
+function Start-AcceptanceTimingPhase {
+    param([string]$Id, [string]$Label)
+    if ($script:AcceptanceTimingCurrent) {
+        Write-Warning "Timing phase still open: $($script:AcceptanceTimingCurrent.id); closing as ok"
+        Stop-AcceptanceTimingPhase -Ok $true | Out-Null
+    }
+    $script:AcceptanceTimingCurrent = @{ id = $Id; label = $Label }
+    $script:AcceptanceTimingSw = [System.Diagnostics.Stopwatch]::StartNew()
+    $script:AcceptanceTimingCurrent.started = (Get-Date).ToUniversalTime().ToString('o')
+}
+
+function Add-TimingPhaseEntry {
+    param(
+        [string]$Id,
+        [string]$Label,
+        [bool]$Ok,
+        [int]$Seconds,
+        [string]$Started = "",
+        [switch]$Skipped,
+        [string]$Reason = ""
+    )
+    $entry = @{
+        id      = $Id
+        label   = $Label
+        seconds = $Seconds
+        ok      = $Ok
+    }
+    if ($Started) { $entry.started = $Started }
+    $entry.ended = (Get-Date).ToUniversalTime().ToString('o')
+    if ($Skipped) {
+        $entry.skipped = $true
+        if ($Reason) { $entry.reason = $Reason }
+        $entry.ok = $false
+    }
+    $script:AcceptanceTimingPhases += $entry
+}
+
+function Stop-AcceptanceTimingPhase {
+    param(
+        [bool]$Ok = $true,
+        [switch]$Skipped,
+        [string]$Reason = ""
+    )
+    if (-not $script:AcceptanceTimingCurrent) { return $null }
+    if ($script:AcceptanceTimingSw) { $script:AcceptanceTimingSw.Stop() }
+    $entry = @{
+        id      = $script:AcceptanceTimingCurrent.id
+        label   = $script:AcceptanceTimingCurrent.label
+        started = $script:AcceptanceTimingCurrent.started
+        ended   = (Get-Date).ToUniversalTime().ToString('o')
+        seconds = [int]$script:AcceptanceTimingSw.Elapsed.TotalSeconds
+        ok      = $Ok
+    }
+    if ($Skipped) {
+        $entry.skipped = $true
+        if ($Reason) { $entry.reason = $Reason }
+    }
+    $script:AcceptanceTimingPhases += $entry
+    $script:AcceptanceTimingCurrent = $null
+    $script:AcceptanceTimingSw = $null
+    return $entry
+}
+
+function Add-SkippedTimingPhase {
+    param([string]$Id, [string]$Label, [string]$Reason)
+    $script:AcceptanceTimingPhases += @{
+        id      = $Id
+        label   = $Label
+        skipped = $true
+        reason  = $Reason
+        seconds = $null
+    }
+}
+
+function Add-L3FullSkippedExtras {
+    param([string]$Reason = "scenario_suite failed")
+    foreach ($pair in @(
+            @("s02_matrix", "S02 三模板矩阵"),
+            @("gitlab_publish", "GitLab 发帖（S02）"),
+            @("ci_gate", "CI 门禁"),
+            @("s06_incremental", "S06 增量评审"),
+            @("phase_c", "Phase C 抽检")
+        )) {
+        Add-SkippedTimingPhase -Id $pair[0] -Label $pair[1] -Reason $Reason
+    }
+}
+
+function Save-AcceptanceTimingJson {
+    param([string]$RecordDir)
+    Stop-AcceptanceTimingPhase -Ok $true | Out-Null
+    $finished = (Get-Date).ToUniversalTime()
+    $total = 0
+    if ($script:AcceptanceTimingStart) {
+        $total = [int](($finished - $script:AcceptanceTimingStart).TotalSeconds)
+    }
+    $obj = @{
+        started       = $script:AcceptanceTimingStart.ToString('o')
+        finished      = $finished.ToString('o')
+        total_seconds = $total
+        phases        = $script:AcceptanceTimingPhases
+    }
+    Write-JsonNoBom -Path (Join-Path $RecordDir "timing.json") -Object $obj
 }
 
 function Stop-AicrListenerOnPort {
@@ -337,21 +453,35 @@ function Invoke-L3StandardSuite {
         [switch]$AssertPublish
     )
     $l3Skipped = $false
+    Start-AcceptanceTimingPhase -Id "l3_env_setup" -Label "L3 环境（GitLab + Demo）"
     $l3Dir = Initialize-L3Run -RecordDir $RecordDir -Meta $Meta -RequireLlm `
         -SkipGitlab:$SkipGitlab -L3Skipped ([ref]$l3Skipped)
     if ($l3Skipped) {
+        Stop-AcceptanceTimingPhase -Ok $false -Skipped -Reason "GitLab not ready" | Out-Null
         if ($Level -in @("L3-standard", "L3-full")) { return @{ ok = $false; skipped = $true } }
         Write-Warning "L3 skipped: GitLab not ready"
         return @{ ok = $true; skipped = $true }
     }
-    if (-not $l3Dir) { return @{ ok = $false; skipped = $false } }
+    if (-not $l3Dir) {
+        Stop-AcceptanceTimingPhase -Ok $false | Out-Null
+        return @{ ok = $false; skipped = $false }
+    }
+    Stop-AcceptanceTimingPhase -Ok $true | Out-Null
 
     $suiteOk = $true
+    $suiteSw = [System.Diagnostics.Stopwatch]::StartNew()
+    $suiteStarted = (Get-Date).ToUniversalTime().ToString('o')
     foreach ($sid in Get-StandardScenarioIds) {
         Write-Host "=== Scenario $sid (baseline) ==="
+        Start-AcceptanceTimingPhase -Id "scenario_$sid" -Label "场景 $sid"
         $r = Invoke-L3ScenarioBaseline -ScenarioId $sid -L3Dir $l3Dir -ReleaseData $ReleaseData -AssertPublish:$AssertPublish
-        if (-not ($r -is [hashtable]) -or -not $r['ok']) { $suiteOk = $false }
+        $scenOk = ($r -is [hashtable]) -and $r['ok']
+        Stop-AcceptanceTimingPhase -Ok $scenOk | Out-Null
+        if (-not $scenOk) { $suiteOk = $false }
     }
+    $suiteSw.Stop()
+    Add-TimingPhaseEntry -Id "scenario_suite" -Label "场景套件 S01–S05" -Ok $suiteOk `
+        -Seconds ([int]$suiteSw.Elapsed.TotalSeconds) -Started $suiteStarted
     $ReleaseData.phases = @{}
     $ReleaseData.phases["scenario_suite"] = @{ ok = $suiteOk }
     Write-JsonNoBom -Path (Join-Path $l3Dir "release_data.json") -Object $ReleaseData
@@ -368,6 +498,7 @@ function Invoke-L3FullExtras {
     $extrasOk = $true
 
     Write-Host "=== S02 prompt matrix ==="
+    Start-AcceptanceTimingPhase -Id "s02_matrix" -Label "S02 三模板矩阵"
     $matrixDir = Join-Path $L3Dir "S02_npe_optional_matrix"
     & $venvPy (Join-Path $ScriptDir "prompt_matrix_test.py") `
         --project-id $S02Mr.project_id --mr-iid $S02Mr.mr_iid `
@@ -381,8 +512,10 @@ function Invoke-L3FullExtras {
         $ReleaseData.matrix_summary = $matrixSummary
     }
     $ReleaseData.phases["s02_matrix"] = @{ ok = $matrixOk }
+    Stop-AcceptanceTimingPhase -Ok $matrixOk | Out-Null
 
     Write-Host "=== CI review gate (S02 MR, expect block on low score, cached) ==="
+    Start-AcceptanceTimingPhase -Id "ci_gate" -Label "CI 门禁"
     $env:AICR_PROJECT_ID = "$($S02Mr.project_id)"
     $env:AICR_MR_IID = "$($S02Mr.mr_iid)"
     $env:AICR_REVIEW_URL = "http://localhost:8001"
@@ -406,21 +539,36 @@ function Invoke-L3FullExtras {
         $extrasOk = $false
     }
     $ReleaseData.phases["ci_gate"] = @{ ok = $gateOk; exit_code = $gateExit; expected_exit = 1 }
+    Stop-AcceptanceTimingPhase -Ok $gateOk | Out-Null
+
+    Start-AcceptanceTimingPhase -Id "gitlab_publish" -Label "GitLab 发帖（S02）"
+    $pubOk = [bool]$ReleaseData.phases["gitlab_publish"].ok
+    if (-not $pubOk) { $extrasOk = $false }
+    Stop-AcceptanceTimingPhase -Ok $pubOk | Out-Null
 
     Write-Host "=== S06 incremental ==="
+    Start-AcceptanceTimingPhase -Id "s06_incremental" -Label "S06 增量评审"
     $s06Branch = "aicr-test/S06_incremental"
     $s06Dir = Join-Path $L3Dir "S06_incremental"
     New-Item -ItemType Directory -Path $s06Dir -Force | Out-Null
     & $venvPy (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
         --scenario "S02_npe_optional" --branch $s06Branch `
         --report-json (Join-Path $s06Dir "apply1.json")
-    if ($LASTEXITCODE -ne 0) { $extrasOk = $false }
+    if ($LASTEXITCODE -ne 0) {
+        $extrasOk = $false
+        Stop-AcceptanceTimingPhase -Ok $false | Out-Null
+        Add-SkippedTimingPhase -Id "phase_c" -Label "Phase C 抽检" -Reason "S06 incremental failed"
+    }
     else {
         & $venvPy (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
             --source-branch $s06Branch --target-branch main `
             --title "AICR acceptance S06_incremental" `
             --report-json (Join-Path $s06Dir "mr.json")
-        if ($LASTEXITCODE -ne 0) { $extrasOk = $false }
+        if ($LASTEXITCODE -ne 0) {
+            $extrasOk = $false
+            Stop-AcceptanceTimingPhase -Ok $false | Out-Null
+            Add-SkippedTimingPhase -Id "phase_c" -Label "Phase C 抽检" -Reason "S06 MR failed"
+        }
         else {
             $s06Mr = Get-Content (Join-Path $s06Dir "mr.json") -Raw | ConvertFrom-Json
             $r1 = Join-Path $s06Dir "review1.json"
@@ -454,8 +602,10 @@ function Invoke-L3FullExtras {
                 second_ok    = ($secondOk -and $val2Ok)
             }
             $ReleaseData.phases["s06_incremental"] = @{ ok = $s06Ok }
+            Stop-AcceptanceTimingPhase -Ok $s06Ok | Out-Null
 
             Write-Host "=== Phase C smoke ==="
+            Start-AcceptanceTimingPhase -Id "phase_c" -Label "Phase C 抽检"
             $phaseReport = Join-Path $s06Dir "phase_c.json"
             & $venvPy (Join-Path $ScriptDir "phase_c_smoke.py") `
                 --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
@@ -463,6 +613,7 @@ function Invoke-L3FullExtras {
             $phaseOk = ($LASTEXITCODE -eq 0)
             if (-not $phaseOk) { $extrasOk = $false }
             $ReleaseData.phases["phase_c"] = @{ ok = $phaseOk }
+            Stop-AcceptanceTimingPhase -Ok $phaseOk | Out-Null
         }
     }
 
@@ -507,22 +658,30 @@ $failed = $false
 $l3Skipped = $false
 
 try {
+Initialize-AcceptanceTiming
+
 if (Should-Run "L1") {
     Write-Host "=== L1 smoke ==="
+    Start-AcceptanceTimingPhase -Id "L1" -Label "L1 冒烟"
     $report = Join-Path $RecordDir "l1-smoke.json"
     & $venvPy (Join-Path $ScriptDir "smoke_test.py") --report-json $report
-    if ($LASTEXITCODE -ne 0) { $failed = $true }
+    $l1Ok = ($LASTEXITCODE -eq 0)
+    if (-not $l1Ok) { $failed = $true }
+    Stop-AcceptanceTimingPhase -Ok $l1Ok | Out-Null
 }
 
 if (-not $failed -and (Should-Run "L2")) {
     Write-Host "=== L2 health ==="
+    Start-AcceptanceTimingPhase -Id "L2" -Label "L2 健康"
     $null = Ensure-AicrRunning -RecordDir $RecordDir -Meta $meta
     $report = Join-Path $RecordDir "l2-health.json"
     & $venvPy (Join-Path $ScriptDir "health_check.py") --report-json $report
-    if ($LASTEXITCODE -ne 0) {
+    $l2Ok = ($LASTEXITCODE -eq 0)
+    if (-not $l2Ok) {
         Write-Warning "L2 failed: ensure evn/.env and AICR are running"
         $failed = $true
     }
+    Stop-AcceptanceTimingPhase -Ok $l2Ok | Out-Null
 }
 
 if (-not $failed -and (Should-Run "L3")) {
@@ -608,25 +767,44 @@ if (-not $failed -and (Should-Run "L3-full")) {
         if ($r.skipped) {
             $l3Skipped = $true
             $failed = $true
+            Add-L3FullSkippedExtras -Reason "GitLab not ready"
         } elseif (-not $r.ok) {
             $failed = $true
+            Add-L3FullSkippedExtras -Reason "scenario_suite failed"
         } else {
             $s02 = $releaseData.scenarios | Where-Object { $_.scenario_id -eq "S02_npe_optional" } | Select-Object -First 1
             if (-not $s02) {
                 Write-Warning "S02 scenario missing from release data"
                 $failed = $true
+                Add-L3FullSkippedExtras -Reason "S02 missing"
             } else {
                 $releaseData.phases["gitlab_publish"] = @{ ok = [bool]$s02.publish_ok }
-                if (-not $s02.publish_ok) { $failed = $true }
+                if (-not $s02.publish_ok) {
+                    $failed = $true
+                    Add-L3FullSkippedExtras -Reason "S02 GitLab publish failed"
+                } else {
                 $s02ReviewPath = Join-Path $r.l3Dir "S02_npe_optional\review.json"
                 $s02Review = Get-Content $s02ReviewPath -Raw | ConvertFrom-Json
                 $s02Mr = @{ project_id = $s02.project_id; mr_iid = $s02.mr_iid }
                 if (-not $failed -and -not (Invoke-L3FullExtras -L3Dir $r.l3Dir -ReleaseData $releaseData -S02Mr $s02Mr -S02Review $s02Review)) {
                     $failed = $true
                 }
+                }
             }
         }
     }
+}
+
+Save-AcceptanceTimingJson -RecordDir $RecordDir
+
+if ($Level -eq "L3-full") {
+    $relArgs = @(
+        (Join-Path $ScriptDir "write_release_report.py"),
+        "--record-dir", $RecordDir,
+        "--level", "L3-full"
+    )
+    if ($failed) { $relArgs += "--failed" }
+    & $venvPy @relArgs | Out-Null
 }
 
 $reportZhArgs = @(
@@ -646,16 +824,6 @@ $summary = @{
     finished   = $finished
 }
 Write-JsonNoBom -Path (Join-Path $RecordDir "summary.json") -Object $summary
-
-if ($Level -eq "L3-full") {
-    $relArgs = @(
-        (Join-Path $ScriptDir "write_release_report.py"),
-        "--record-dir", $RecordDir,
-        "--level", "L3-full"
-    )
-    if ($failed) { $relArgs += "--failed" }
-    & $venvPy @relArgs | Out-Null
-}
 
 } finally {
     if ($script:StartedAicrPid -and -not $KeepAicrRunning) {

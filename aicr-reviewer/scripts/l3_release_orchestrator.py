@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +22,14 @@ STANDARD_SCENARIOS = [
     "S03_empty_catch",
     "S04_hardcoded_secret",
     "S05_feign_no_timeout",
+]
+
+L3_FULL_SKIPPED_EXTRAS = [
+    ("s02_matrix", "S02 三模板矩阵"),
+    ("gitlab_publish", "GitLab 发帖（S02）"),
+    ("ci_gate", "CI 门禁"),
+    ("s06_incremental", "S06 增量评审"),
+    ("phase_c", "Phase C 抽检"),
 ]
 
 
@@ -184,16 +193,32 @@ def scenario_baseline(
     }
 
 
-def run_standard(l3_dir: Path, *, assert_publish: bool) -> dict:
+def run_standard(l3_dir: Path, *, assert_publish: bool, timing) -> dict:
     release: dict = {"scenarios": [], "warnings": [], "phases": {}}
     suite_ok = True
+    timing.start("l3_env_setup", "L3 环境（GitLab + Demo）")
+    timing.end(ok=True)
+
+    suite_t0 = time.perf_counter()
     for sid in STANDARD_SCENARIOS:
         print(f"=== Scenario {sid} (baseline) ===")
+        timing.start(f"scenario_{sid}", f"场景 {sid}")
         entry = scenario_baseline(sid, l3_dir, assert_publish=assert_publish)
+        timing.end(ok=entry["ok"])
         release["scenarios"].append(entry)
         if not entry["ok"]:
             suite_ok = False
             release["warnings"].append(f"Scenario {sid} validation/publish failed")
+    suite_elapsed = int(time.perf_counter() - suite_t0)
+    timing.phases.append(
+        {
+            "id": "scenario_suite",
+            "label": "场景套件 S01–S05",
+            "seconds": suite_elapsed,
+            "ok": suite_ok,
+            "ended": timing.phases[-1]["ended"] if timing.phases else "",
+        }
+    )
     release["phases"]["scenario_suite"] = {"ok": suite_ok}
     (l3_dir / "release_data.json").write_text(
         json.dumps(release, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -201,7 +226,7 @@ def run_standard(l3_dir: Path, *, assert_publish: bool) -> dict:
     return {"ok": suite_ok, "release": release}
 
 
-def run_full_extras(l3_dir: Path, release: dict, s02: dict) -> bool:
+def run_full_extras(l3_dir: Path, release: dict, s02: dict, timing) -> bool:
     extras_ok = True
     phases = release.setdefault("phases", {})
     s02_mr = {"project_id": s02["project_id"], "mr_iid": s02["mr_iid"]}
@@ -209,6 +234,8 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict) -> bool:
     review_path = l3_dir / "S02_npe_optional" / "review.json"
     s02_review = json.loads(review_path.read_text(encoding="utf-8"))
 
+    print("=== S02 prompt matrix ===")
+    timing.start("s02_matrix", "S02 三模板矩阵")
     matrix_dir = l3_dir / "S02_npe_optional_matrix"
     matrix_rc = run_cmd(
         [
@@ -226,25 +253,45 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict) -> bool:
         ],
         check=False,
     )
-    phases["s02_matrix"] = {"ok": matrix_rc == 0}
-    if matrix_rc != 0:
+    matrix_ok = matrix_rc == 0
+    phases["s02_matrix"] = {"ok": matrix_ok}
+    timing.end(ok=matrix_ok)
+    if not matrix_ok:
         extras_ok = False
     ms = matrix_dir / "matrix_summary.json"
     if ms.is_file():
         release["matrix_summary"] = json.loads(ms.read_text(encoding="utf-8"))
 
+    print("=== CI review gate (cached S02 score) ===")
+    timing.start("ci_gate", "CI 门禁")
     gate_exit = evaluate_ci_gate(
         s02_review.get("score"),
         review_completed=bool(s02_review.get("review_completed")),
     )
     gate_ok = gate_exit == 1
-    phases["ci_gate"] = {"ok": gate_ok, "exit_code": gate_exit, "expected_exit": 1, "cached": True}
+    phases["ci_gate"] = {
+        "ok": gate_ok,
+        "exit_code": gate_exit,
+        "expected_exit": 1,
+        "cached": True,
+    }
+    timing.end(ok=gate_ok)
     if not gate_ok:
         extras_ok = False
 
+    timing.start("gitlab_publish", "GitLab 发帖（S02）")
+    pub_ok = bool(s02.get("publish_ok", False))
+    phases["gitlab_publish"] = {"ok": pub_ok}
+    timing.end(ok=pub_ok)
+    if not pub_ok:
+        extras_ok = False
+
+    print("=== S06 incremental ===")
+    timing.start("s06_incremental", "S06 增量评审")
     s06_branch = "aicr-test/S06_incremental"
     s06_dir = l3_dir / "S06_incremental"
     s06_dir.mkdir(parents=True, exist_ok=True)
+    s06_ok = False
     if run_cmd(
         [
             _py(),
@@ -259,6 +306,8 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict) -> bool:
         check=False,
     ):
         extras_ok = False
+        timing.end(ok=False)
+        timing.add_skipped("phase_c", "Phase C 抽检", "S06 incremental failed")
     else:
         run_cmd(
             [
@@ -347,29 +396,40 @@ def run_full_extras(l3_dir: Path, release: dict, s02: dict) -> bool:
             "second_sha": second.get("prompt_sha256"),
             "second_ok": s06_ok,
         }
+        timing.end(ok=s06_ok)
         if not s06_ok:
             extras_ok = False
-        phase_rc = run_cmd(
-            [
-                _py(),
-                str(SCRIPTS / "phase_c_smoke.py"),
-                "--project-id",
-                str(s06_mr["project_id"]),
-                "--mr-iid",
-                str(s06_mr["mr_iid"]),
-                "--report-json",
-                str(s06_dir / "phase_c.json"),
-            ],
-            check=False,
-        )
-        phases["phase_c"] = {"ok": phase_rc == 0}
-        if phase_rc != 0:
-            extras_ok = False
+            timing.add_skipped("phase_c", "Phase C 抽检", "S06 validation failed")
+        else:
+            print("=== Phase C smoke ===")
+            timing.start("phase_c", "Phase C 抽检")
+            phase_rc = run_cmd(
+                [
+                    _py(),
+                    str(SCRIPTS / "phase_c_smoke.py"),
+                    "--project-id",
+                    str(s06_mr["project_id"]),
+                    "--mr-iid",
+                    str(s06_mr["mr_iid"]),
+                    "--report-json",
+                    str(s06_dir / "phase_c.json"),
+                ],
+                check=False,
+            )
+            phases["phase_c"] = {"ok": phase_rc == 0}
+            timing.end(ok=phase_rc == 0)
+            if phase_rc != 0:
+                extras_ok = False
 
     (l3_dir / "release_data.json").write_text(
         json.dumps(release, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     return extras_ok
+
+
+def add_full_skipped_extras(timing, reason: str = "scenario_suite failed") -> None:
+    for phase_id, label in L3_FULL_SKIPPED_EXTRAS:
+        timing.add_skipped(phase_id, label, reason)
 
 
 def main() -> int:
@@ -384,26 +444,42 @@ def main() -> int:
 
     apply_monorepo_env()
 
-    l3_dir = Path(args.record_dir) / "l3"
+    record_dir = Path(args.record_dir)
+    l3_dir = record_dir / "l3"
     l3_dir.mkdir(parents=True, exist_ok=True)
 
     if args.mode == "full" and os.environ.get("REVIEW_DRY_RUN", "0") == "1":
         print("L3-full requires REVIEW_DRY_RUN=0", file=sys.stderr)
         return 1
 
+    sys.path.insert(0, str(SCRIPTS))
+    from acceptance_timing import TimingRecorder
+
+    timing = TimingRecorder()
     assert_pub = args.mode == "full"
-    result = run_standard(l3_dir, assert_publish=assert_pub)
+    result = run_standard(l3_dir, assert_publish=assert_pub, timing=timing)
     if not result["ok"]:
+        if args.mode == "full":
+            add_full_skipped_extras(timing)
+        timing.write(record_dir / "timing.json")
         return 1
     if args.mode == "standard":
+        timing.write(record_dir / "timing.json")
         return 0
 
     release = result["release"]
     s02 = next(s for s in release["scenarios"] if s["scenario_id"] == "S02_npe_optional")
     release["phases"]["gitlab_publish"] = {"ok": s02.get("publish_ok", False)}
     if not s02.get("publish_ok"):
+        add_full_skipped_extras(timing, "S02 GitLab publish failed")
+        timing.write(record_dir / "timing.json")
+        (l3_dir / "release_data.json").write_text(
+            json.dumps(release, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
         return 1
-    if not run_full_extras(l3_dir, release, s02):
+    ok = run_full_extras(l3_dir, release, s02, timing)
+    timing.write(record_dir / "timing.json")
+    if not ok:
         return 1
     return 0
 

@@ -153,20 +153,24 @@ if [[ "$FAILED" -eq 0 ]] && should_run L3-full; then
   fi
 fi
 
-ARGS=(scripts/report_zh.py --record-dir "$RECORD_DIR" --level "$LEVEL")
+ARGS=(scripts/finalize_acceptance_timing.py --record-dir "$RECORD_DIR" --level "$LEVEL")
 [[ "$FAILED" -eq 1 ]] && ARGS+=(--failed)
 "$PY" "${ARGS[@]}"
-
-FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-cat >"$RECORD_DIR/summary.json" <<EOF
-{"level":"$LEVEL","record_dir":"$RECORD_DIR","failed":$FAILED,"l3_skipped":$L3_SKIPPED,"finished":"$FINISHED"}
-EOF
 
 if [[ "$LEVEL" == "L3-full" ]]; then
   REL=(scripts/write_release_report.py --record-dir "$RECORD_DIR" --level L3-full)
   [[ "$FAILED" -eq 1 ]] && REL+=(--failed)
   "$PY" "${REL[@]}"
 fi
+
+REPORT=(scripts/report_zh.py --record-dir "$RECORD_DIR" --level "$LEVEL")
+[[ "$FAILED" -eq 1 ]] && REPORT+=(--failed)
+"$PY" "${REPORT[@]}"
+
+FINISHED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+cat >"$RECORD_DIR/summary.json" <<EOF
+{"level":"$LEVEL","record_dir":"$RECORD_DIR","failed":$FAILED,"l3_skipped":$L3_SKIPPED,"finished":"$FINISHED"}
+EOF
 
 echo "Done: $RECORD_DIR"
 [[ "$FAILED" -eq 1 ]] && exit 1

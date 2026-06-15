@@ -9,6 +9,13 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
+from acceptance_timing import (
+    format_duration,
+    gate_phases_for_level,
+    load_timing,
+    phase_by_id,
+    phase_result_label,
+)
 
 def _read_json(path: Path) -> dict | list | None:
     if not path.is_file():
@@ -30,6 +37,131 @@ def _git_head(repo: Path) -> str:
         return "unknown"
 
 
+def _mr_link(mr_url: str, mr_iid: int | str | None) -> str:
+    if not mr_url:
+        return "—"
+    label = f"!{mr_iid}" if mr_iid else "MR"
+    return f"[{label}]({mr_url})"
+
+
+def _failure_reason(record_dir: Path, scenario_id: str, scenario: dict) -> str:
+    validate = _read_json(record_dir / "l3" / scenario_id / "validate.json")
+    if isinstance(validate, dict):
+        errors = validate.get("errors") or []
+        if errors:
+            return "; ".join(str(e) for e in errors)
+        checks = validate.get("checks") or {}
+        missing = checks.get("keywords_missing") or []
+        if missing:
+            return f"keywords missing: {missing}"
+    note = scenario.get("note") or ""
+    if note:
+        return str(note)
+    if scenario.get("validation_ok") is False:
+        return "校验未通过"
+    if scenario.get("publish_ok") is False:
+        return "GitLab 发帖未通过"
+    return ""
+
+
+def _gate_note(phase_id: str, release_phases: dict, timing_phase: dict | None) -> str:
+    if timing_phase and timing_phase.get("skipped"):
+        return str(timing_phase.get("reason") or "前置失败短路")
+    rp = release_phases.get(phase_id) or {}
+    if phase_id == "scenario_suite" and not rp:
+        return ""
+    if phase_id == "ci_gate" and rp:
+        if rp.get("cached"):
+            return "基于 S02 baseline 缓存分数"
+        exp = rp.get("expected_exit")
+        got = rp.get("exit_code")
+        if exp is not None and got is not None:
+            return f"exit {got}（预期 {exp}）"
+    if phase_id == "L1" and not rp:
+        return ""
+    if phase_id == "L2" and not rp:
+        return ""
+    return ""
+
+
+def _collect_failures(
+    record_dir: Path,
+    release_data: dict,
+    timing: dict | None,
+    *,
+    l1_ok: bool | None,
+    l2_ok: bool | None,
+) -> list[str]:
+    failures: list[str] = []
+    if l1_ok is False:
+        failures.append("L1 冒烟未通过")
+    if l2_ok is False:
+        failures.append("L2 健康检查未通过")
+    phases = release_data.get("phases") or {}
+    for phase_id, label in gate_phases_for_level("L3-full"):
+        if phase_id in ("L1", "L2"):
+            continue
+        tp = phase_by_id(timing, phase_id)
+        if tp and tp.get("skipped"):
+            continue
+        rp = phases.get(phase_id)
+        if rp is not None and not rp.get("ok", False):
+            failures.append(f"{label}未通过")
+    for s in release_data.get("scenarios") or []:
+        if not s.get("validation_ok", True) or s.get("publish_ok") is False:
+            sid = s.get("scenario_id", "")
+            reason = _failure_reason(record_dir, sid, s)
+            failures.append(f"{sid}：{reason or '校验/发帖失败'}")
+    return failures
+
+
+def _collect_skipped(timing: dict | None, level: str) -> list[str]:
+    if not timing:
+        return []
+    gate_ids = {p[0] for p in gate_phases_for_level(level)}
+    out: list[str] = []
+    for p in timing.get("phases") or []:
+        if p.get("skipped") and p.get("id") in gate_ids:
+            reason = p.get("reason") or ""
+            label = p.get("label") or p.get("id")
+            out.append(f"{label}" + (f"（{reason}）" if reason else ""))
+    return out
+
+
+def _phase_duration(timing: dict | None, phase_id: str) -> str:
+    p = phase_by_id(timing, phase_id)
+    if not p:
+        return "—"
+    if p.get("skipped"):
+        return "—"
+    return format_duration(p.get("seconds"))
+
+
+def _phase_result(
+    phase_id: str,
+    timing: dict | None,
+    release_phases: dict,
+    *,
+    l1_ok: bool | None = None,
+    l2_ok: bool | None = None,
+) -> str:
+    tp = phase_by_id(timing, phase_id)
+    if tp and tp.get("skipped"):
+        return "未执行"
+    if phase_id == "L1" and l1_ok is not None:
+        return "通过" if l1_ok else "失败"
+    if phase_id == "L2" and l2_ok is not None:
+        return "通过" if l2_ok else "失败"
+    rp = release_phases.get(phase_id)
+    if rp is None and tp is None:
+        return "—"
+    if tp:
+        return phase_result_label(tp)
+    if rp is not None:
+        return "通过" if rp.get("ok") else "失败"
+    return "—"
+
+
 def write_release_md(record_dir: Path, *, level: str, failed: bool) -> str:
     record_dir = Path(record_dir)
     meta = _read_json(record_dir / "meta.json") or {}
@@ -37,71 +169,148 @@ def write_release_md(record_dir: Path, *, level: str, failed: bool) -> str:
     l1 = _read_json(record_dir / "l1-smoke.json") or {}
     l2 = _read_json(record_dir / "l2-health.json") or {}
     release_data = _read_json(record_dir / "l3" / "release_data.json") or {}
+    timing = load_timing(record_dir)
 
     l1_ok = l1.get("failed", 1) == 0 if l1 else None
     l2_ok = l2.get("ok") if l2 else None
+    release_phases = release_data.get("phases") or {}
+
+    total_seconds = (timing or {}).get("total_seconds")
+    total_label = format_duration(total_seconds) if total_seconds is not None else "—"
+    failures = _collect_failures(
+        record_dir, release_data, timing, l1_ok=l1_ok, l2_ok=l2_ok
+    )
+    skipped = _collect_skipped(timing, level)
 
     lines = [
         "# L3-Full 交付签收报告",
         "",
-        f"- 生成时间：`{datetime.now(timezone.utc).isoformat()}`",
+        f"- **交付结论：{'不通过' if failed else '通过'}**",
+        f"- **总耗时：{total_label}**",
         f"- 验收层级：**{level}**",
         f"- 报告目录：`{record_dir}`",
-        f"- Git commit：`{_git_head(record_dir.parent)}`",
-        f"- 主机：`{meta.get('hostname', '')}` / 用户 `{meta.get('user', '')}`",
-        f"- **交付结论：{'不通过' if failed else '通过'}**",
         "",
-        "## 门禁汇总",
-        "",
-        "| 阶段 | 结果 |",
-        "|------|------|",
     ]
-    if l1_ok is not None:
-        lines.append(f"| L1 冒烟 | {'通过' if l1_ok else '失败'} ({l1.get('passed', 0)}/{l1.get('total', 0)}) |")
-    if l2_ok is not None:
-        lines.append(f"| L2 健康 | {'通过' if l2_ok else '失败'} |")
 
-    phases = release_data.get("phases") or {}
-    for key, label in (
-        ("scenario_suite", "场景套件 S01–S05"),
-        ("s02_matrix", "S02 三模板矩阵"),
-        ("gitlab_publish", "GitLab 发帖"),
-        ("ci_gate", "CI 门禁"),
-        ("s06_incremental", "S06 增量评审"),
-        ("phase_c", "Phase C 抽检"),
-    ):
-        if key in phases:
-            lines.append(f"| {label} | {'通过' if phases[key].get('ok') else '失败'} |")
+    if failures:
+        lines.append("### 失败项")
+        lines.append("")
+        for f in failures:
+            lines.append(f"- {f}")
+        lines.append("")
+
+    if skipped:
+        lines.append("### 未执行阶段")
+        lines.append("")
+        for s in skipped:
+            lines.append(f"- {s}")
+        lines.append("")
+
+    lines.extend(
+        [
+            "## 门禁汇总",
+            "",
+            "| 阶段 | 结果 | 耗时 | 说明 |",
+            "|------|------|------|------|",
+        ]
+    )
+
+    for phase_id, label in gate_phases_for_level(level):
+        if phase_id == "L1" and l1_ok is None:
+            continue
+        if phase_id == "L2" and l2_ok is None:
+            continue
+        if phase_id not in ("L1", "L2") and phase_id not in release_phases:
+            tp = phase_by_id(timing, phase_id)
+            if not tp:
+                continue
+        result = _phase_result(
+            phase_id,
+            timing,
+            release_phases,
+            l1_ok=l1_ok,
+            l2_ok=l2_ok,
+        )
+        duration = _phase_duration(timing, phase_id)
+        note = _gate_note(phase_id, release_phases, phase_by_id(timing, phase_id))
+        if phase_id == "L1" and l1_ok is not None:
+            note = f"{l1.get('passed', 0)}/{l1.get('total', 0)} 项"
+        lines.append(f"| {label} | {result} | {duration} | {note} |")
 
     lines.extend(["", "## 场景明细", ""])
-    scenarios = release_data.get("scenarios") or []
+    scenarios = list(release_data.get("scenarios") or [])
+    scenarios.sort(
+        key=lambda s: (
+            0 if s.get("validation_ok") and s.get("publish_ok", True) else 1,
+            s.get("scenario_id", ""),
+        )
+    )
     if scenarios:
-        lines.append("| 场景 | 分数 | 校验 | MR | 备注 |")
-        lines.append("|------|------|------|-----|------|")
+        lines.append("| 场景 | 分数 | 校验 | MR | 失败原因 |")
+        lines.append("|------|------|------|-----|----------|")
         for s in scenarios:
+            sid = s.get("scenario_id", "")
+            reason = _failure_reason(record_dir, sid, s)
+            if s.get("validation_ok") and s.get("publish_ok", True):
+                reason = reason or "—"
             lines.append(
-                f"| `{s.get('scenario_id', '')}` | {s.get('score', '')} | "
+                f"| `{sid}` | {s.get('score', '')} | "
                 f"{'通过' if s.get('validation_ok') else '失败'} | "
-                f"{s.get('mr_url', '—')} | {s.get('note', '')} |"
+                f"{_mr_link(s.get('mr_url', ''), s.get('mr_iid'))} | {reason} |"
             )
     else:
         lines.append("（无场景数据）")
 
     matrix = release_data.get("matrix_summary")
-    if matrix:
+    matrix_phase = phase_by_id(timing, "s02_matrix")
+    if matrix or matrix_phase:
         lines.extend(["", "## S02 矩阵", ""])
-        lines.append(f"- 通过：{matrix.get('passed', 0)}/{matrix.get('passed', 0) + matrix.get('failed', 0)}")
-        for r in matrix.get("results") or []:
+        if matrix_phase:
             lines.append(
-                f"- `{r.get('template_id')}`: score={r.get('score')} "
-                f"issues={r.get('issue_count')} ok={r.get('ok')}"
+                f"- 阶段耗时：**{format_duration(matrix_phase.get('seconds'))}**"
             )
+        if matrix:
+            passed = matrix.get("passed", 0)
+            failed_n = matrix.get("failed", 0)
+            lines.append(f"- 通过：{passed}/{passed + failed_n}")
+            lines.append("")
+            lines.append("| 模板 | 分数 | issues | 结果 |")
+            lines.append("|------|------|--------|------|")
+            for r in matrix.get("results") or []:
+                lines.append(
+                    f"| `{r.get('template_id', '')}` | {r.get('score', '')} | "
+                    f"{r.get('issue_count', '')} | "
+                    f"{'通过' if r.get('ok') else '失败'} |"
+                )
 
     incremental = release_data.get("incremental")
-    if incremental:
+    s06_phase = phase_by_id(timing, "s06_incremental")
+    if incremental or s06_phase:
         lines.extend(["", "## S06 增量", ""])
-        lines.append(f"- 第一次 review：score={incremental.get('first_score')} sha={incremental.get('first_sha', '')[:12]}")
-        lines.append(f"- 第二次 review（增量）：score={incremental.get('second_score')} ok={incremental.get('second_ok')}")
+        if s06_phase:
+            lines.append(
+                f"- 阶段耗时：**{format_duration(s06_phase.get('seconds'))}**"
+            )
+        if incremental:
+            lines.append(
+                f"- 第一次 review：score={incremental.get('first_score')} "
+                f"sha={(incremental.get('first_sha') or '')[:12]}"
+            )
+            lines.append(
+                f"- 第二次 review（增量）：score={incremental.get('second_score')} "
+                f"ok={incremental.get('second_ok')}"
+            )
+
+    phase_c = phase_by_id(timing, "phase_c")
+    pc = release_phases.get("phase_c")
+    if phase_c or pc:
+        lines.extend(["", "## Phase C", ""])
+        if phase_c:
+            lines.append(
+                f"- 阶段耗时：**{format_duration(phase_c.get('seconds'))}**"
+            )
+        if pc:
+            lines.append(f"- 结果：**{'通过' if pc.get('ok') else '失败'}**")
 
     flaky = release_data.get("warnings") or []
     if flaky:
@@ -109,16 +318,20 @@ def write_release_md(record_dir: Path, *, level: str, failed: bool) -> str:
         for w in flaky:
             lines.append(f"- {w}")
 
-    lines.extend([
-        "",
-        "## 签收",
-        "",
-        f"- 执行人：`{meta.get('user', '')}`",
-        f"- 完成时间：`{summary.get('finished', '')}`",
-        "",
-        "> `test-results/` 已 gitignore；含 LLM 评审结论，请勿提交仓库。",
-        "",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 签收",
+            "",
+            f"- 执行人：`{meta.get('user', '')}`",
+            f"- 完成时间：`{summary.get('finished') or (timing or {}).get('finished') or ''}`",
+            f"- Git commit：`{_git_head(record_dir.parent)}`",
+            f"- 主机：`{meta.get('hostname', '')}`",
+            "",
+            "> `test-results/` 已 gitignore；含 LLM 评审结论，请勿提交仓库。",
+            "",
+        ]
+    )
     text = "\n".join(lines)
     (record_dir / "release.zh.md").write_text(text, encoding="utf-8")
     return text

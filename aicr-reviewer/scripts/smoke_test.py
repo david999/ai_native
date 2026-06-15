@@ -1612,6 +1612,40 @@ def test_assert_gitlab_publish():
     print("OK assert_gitlab_publish")
 
 
+def test_acceptance_timing():
+    import sys
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from acceptance_timing import (
+        TimingRecorder,
+        format_duration,
+        gate_phases_for_level,
+        phase_result_label,
+    )
+
+    assert format_duration(None) == "—"
+    assert format_duration(45) == "45s"
+    assert format_duration(125) == "2m05s"
+    assert format_duration(3665) == "1h01m"
+    assert phase_result_label({"skipped": True}) == "未执行"
+    assert phase_result_label({"ok": True}) == "通过"
+    assert len(gate_phases_for_level("L3-full")) >= 9
+    assert len(gate_phases_for_level("L3-standard")) == 5
+
+    rec = TimingRecorder()
+    rec.start("L1", "L1 冒烟")
+    rec.end(ok=True)
+    rec.add_skipped("phase_c", "Phase C", "suite failed")
+    data = rec.to_dict()
+    assert data["total_seconds"] >= 0
+    assert len(data["phases"]) == 2
+    assert data["phases"][1]["skipped"] is True
+    print("OK acceptance_timing")
+
+
 def _write_smoke_report(path, run_id, entries, failed, total):
     import json
     from pathlib import Path
@@ -1738,6 +1772,7 @@ if __name__ == "__main__":
         test_prompt_matrix_exit_code,
         test_validate_scenario,
         test_assert_gitlab_publish,
+        test_acceptance_timing,
     ]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     entries = []

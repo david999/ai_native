@@ -188,7 +188,7 @@ cd <repo>\aicr-reviewer
 .\scripts\run_acceptance.ps1 -Level L3-full -KeepAicrRunning
 ```
 
-含 L1+L2、S01–S05 场景质量门禁、S02 三模板矩阵、GitLab 真实发帖、CI 门禁、S06 增量、Phase C 抽检；产出 **`release.zh.md`**。详见 [L3_RELEASE_ACCEPTANCE.md](./L3_RELEASE_ACCEPTANCE.md)。
+含 L1+L2、S01–S05 场景质量门禁、S02 三模板矩阵、GitLab 真实发帖、CI 门禁、S06 增量、Phase C 抽检；产出 **`release.zh.md`**。**跑前/跑后请用** [L3_FULL_SIGNOFF_CHECKLIST.md](./L3_FULL_SIGNOFF_CHECKLIST.md)；详见 [L3_RELEASE_ACCEPTANCE.md](./L3_RELEASE_ACCEPTANCE.md)。
 
 ### L3 — 全链路 E2E（单场景 + 矩阵，兼容旧流程）
 
@@ -290,6 +290,8 @@ curl -s -X POST http://localhost:8001/webhook/gitlab \
 - [ ] `GET /health/detail` 中 `token_set`、`llm_key_set` 符合预期
 
 ### 发版签收（L3-full）
+
+按 [L3_FULL_SIGNOFF_CHECKLIST.md](./L3_FULL_SIGNOFF_CHECKLIST.md) 完整勾选；单次记录复制 [templates/l3-full-run-log.md](./templates/l3-full-run-log.md)。
 
 - [ ] `REVIEW_DRY_RUN=0`（真实发帖）
 - [ ] `.\scripts\run_acceptance.ps1 -Level L3-full` exit 0
