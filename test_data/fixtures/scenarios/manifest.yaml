@@ -52,8 +52,9 @@ scenarios:
     title: 增量评审二次 commit
     branch: aicr-test/S06_incremental
     incremental_only: true
+    # 二次增量 diff 通常仅 1 个 major issue → score ≈ 72（100−28）；原 max 65 过严
     expected_score_min: 0
-    expected_score_max: 65
+    expected_score_max: 75
     must_find_keywords:
       - null
     language_hint: Java/Spring

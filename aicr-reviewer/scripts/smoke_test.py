@@ -1617,6 +1617,20 @@ def test_validate_scenario():
     r5 = validate_scenario_result("S01_clean_refactor", s01_low, tolerance=5.0)
     assert r5["ok"], r5["errors"]
     assert any("outside" in w for w in r5["warnings"])
+
+    s06_ok = {
+        "review_completed": True,
+        "score": 72,
+        "summary": "null safety on Optional.orElse",
+        "issues": [{"file": "src/main/java/com/example/demo/service/UserService.java", "message": "null NPE"}],
+    }
+    r6 = validate_scenario_result("S06_incremental", s06_ok, tolerance=5.0)
+    assert r6["ok"], r6["errors"]
+
+    s06_high = dict(s06_ok, score=85)
+    r7 = validate_scenario_result("S06_incremental", s06_high, tolerance=5.0)
+    assert not r7["ok"]
+    assert any("outside" in e for e in r7["errors"])
     print("OK validate_scenario")
 
 

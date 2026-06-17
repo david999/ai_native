@@ -139,7 +139,7 @@ python scripts\smoke_test.py
 
 | 用例 | 说明 |
 |------|------|
-| `test_validate_scenario` | 分数区间、关键词、变更文件硬命中、S01 relax_score |
+| `test_validate_scenario` | 分数区间、关键词、变更文件硬命中、S01 relax_score、S06 增量 score≈72 |
 | `test_assert_gitlab_publish` | AICR 摘要 note 识别（收紧 marker） |
 
 ### LLM 工厂
