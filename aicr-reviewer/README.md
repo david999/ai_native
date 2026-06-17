@@ -2,7 +2,7 @@
 
 基于 LLM 的 GitLab Merge Request 自动代码评审服务。
 
-更多说明见仓库根目录 [README.md](../README.md)、[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)。
+更多说明见仓库根目录 [README.md](../README.md)、[docs/系统架构.md](../docs/系统架构.md)。
 
 ## 运行方式
 
@@ -13,7 +13,7 @@
 
 ## 配置
 
-密钥与变量放在 **`evn/.env`**（见 `evn/.env.example`、`docs/SECRETS.md`）。
+密钥与变量放在 **`evn/.env`**（见 `evn/.env.example`、`docs/环境变量与密钥.md`）。
 
 ```bash
 # evn/.env 关键项
@@ -36,9 +36,9 @@ cd E:\ai_native\aicr-reviewer
 
 健康检查：`GET http://localhost:8001/health`
 
-冒烟测试：`python scripts/smoke_test.py`（用例矩阵 [docs/TESTING.md](../docs/TESTING.md)）
+冒烟测试：`python scripts/smoke_test.py`（用例矩阵 [docs/测试与验收.md](../docs/测试与验收.md)）
 
-一键验收：`.\scripts\run_acceptance.ps1 -Level all`（[docs/ACCEPTANCE_TESTING.md](../docs/ACCEPTANCE_TESTING.md)）
+一键验收：`.\scripts\run_acceptance.ps1 -Level all`（[docs/测试与验收.md](../docs/测试与验收.md)）
 
 ## Linux Docker 部署
 
@@ -61,7 +61,7 @@ docker compose -f docker-compose.yml \
 | `GET /health` | 健康检查（仅 `status`） |
 | `GET /health/detail` | 详细配置探测（含 `review_dry_run`、`llm_key_set` 等；内网/运维/L3 preflight 用） |
 | `POST /review` | CI 触发；Header `X-AICR-Secret`（若配置了 `REVIEW_API_SECRET`） |
-| `POST /describe` | 生成 MR 描述（阶段 C，见 [docs/PHASE_C.md](../docs/PHASE_C.md)） |
+| `POST /describe` | 生成 MR 描述（阶段 C，见 [docs/阶段C扩展能力.md](../docs/阶段C扩展能力.md)） |
 | `POST /changelog` | 生成 CHANGELOG 并发布 MR note |
 | `POST /webhook/gitlab` | MR + **Note** 事件；需 `GITLAB_WEBHOOK_SECRET` |
 
@@ -76,7 +76,7 @@ docker compose -f docker-compose.yml \
 | `system_template_requested` | 请求中的 `system_template`（未指定则为空） |
 | `prompt_sha256` | 渲染后 system prompt 的 SHA-256 |
 
-可选请求体字段 `system_template`（须在白名单内，见 `prompts/variants/manifest.yaml`）覆盖 env `AICR_SYSTEM_TEMPLATE`；非法值返回 **400**。`PromptRenderer.render_system_text()` 为仅返回文本的兼容包装。详见 [docs/PROMPT_TEMPLATES.md](../docs/PROMPT_TEMPLATES.md)。
+可选请求体字段 `system_template`（须在白名单内，见 `prompts/variants/manifest.yaml`）覆盖 env `AICR_SYSTEM_TEMPLATE`；非法值返回 **400**。`PromptRenderer.render_system_text()` 为仅返回文本的兼容包装。详见 [docs/提示词模板.md](../docs/提示词模板.md)。
 
 ## GitLab CI 门禁（Runner 侧）
 

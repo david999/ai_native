@@ -4,7 +4,7 @@
 
     uvicorn main:app --host 0.0.0.0 --port 8001
 
-环境变量从仓库 ``evn/.env`` 加载，详见 ``docs/SECRETS.md``。
+环境变量从仓库 ``evn/.env`` 加载，详见 ``docs/环境变量与密钥.md``。
 """
 
 import logging

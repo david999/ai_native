@@ -25,7 +25,7 @@ evn/
 ```bash
 # 仓库根目录
 cp evn/.env.example evn/.env
-# 编辑 evn/.env，见 docs/SECRETS.md
+# 编辑 evn/.env，见 docs/环境变量与密钥.md
 
 # 可选：阶段 C 部署配置
 cp evn/.aicr/config.toml.example evn/.aicr/config.toml
@@ -91,4 +91,4 @@ cd aicr-reviewer
 | | `gitlab/data/`、`gitlab/logs/`、`gitlab/config/` |
 | | `gitlab-runner/config/` |
 
-详见 [docs/SECRETS.md](../docs/SECRETS.md)。
+详见 [docs/环境变量与密钥.md](../docs/环境变量与密钥.md)。

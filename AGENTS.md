@@ -8,11 +8,11 @@
 
 ## Documentation sync
 
-改 **行为 / API / 配置 / CI** 相关代码时，须在同一任务内更新对应 Markdown（见 [docs/README.md](docs/README.md) 映射表）。
+改 **行为 / API / 配置 / CI** 相关代码时，须在同一任务内更新对应 Markdown（见 [docs/文档索引.md](docs/文档索引.md) 映射表）。
 
 - Cursor 规则：[`.cursor/rules/docs-sync.mdc`](.cursor/rules/docs-sync.mdc)（全局）、[`docs-sync-aicr-reviewer.mdc`](.cursor/rules/docs-sync-aicr-reviewer.mdc)、[`docs-sync-evn.mdc`](.cursor/rules/docs-sync-evn.mdc)
-- 新增 env var → `evn/.env.example` + `docs/SECRETS.md`
-- 改 `scripts/smoke_test.py` → `docs/TESTING.md`
+- 新增 env var → `evn/.env.example` + `docs/环境变量与密钥.md`
+- 改 `scripts/smoke_test.py` → `docs/测试与验收.md`
 - 验收：`cd aicr-reviewer && python scripts/smoke_test.py`
 
 ## Cursor Cloud specific instructions
@@ -22,16 +22,16 @@
 | 步骤 | 命令 |
 |------|------|
 | 依赖 | `cd aicr-reviewer && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt` |
-| 冒烟测试 | `cd aicr-reviewer && source .venv/bin/activate && python scripts/smoke_test.py`（覆盖见 `docs/TESTING.md`；本地 PC 验收见 `docs/LOCAL_PC_VERIFICATION.md`） |
+| 冒烟测试 | `cd aicr-reviewer && source .venv/bin/activate && python scripts/smoke_test.py`（覆盖见 `docs/测试与验收.md`；本地 PC 验收见 `docs/测试与验收.md`） |
 | 日常验收 | `cd aicr-reviewer && .\scripts\run_acceptance.ps1 -Level daily`（L1+L2，中文报告，**无需 Docker**） |
-| 读最新报告 | `python scripts/show_latest_report.py`（见 `docs/ACCEPTANCE_TESTING.md`） |
+| 读最新报告 | `python scripts/show_latest_report.py`（见 `docs/测试与验收.md`） |
 | 启动 API | `./scripts/run_local.sh` 或 `python -m uvicorn main:app --host 0.0.0.0 --port 8001 --reload`（工作目录为 `aicr-reviewer/`） |
 | 健康检查 | `curl http://localhost:8001/health` |
 
 ### 环境变量
 
 - 配置路径：`evn/.env`（仓库根目录下的 `evn/`，非 `env`）。
-- 本地快速启动可复制模板：`cp evn/.env.example evn/.env`；完整说明见 `docs/SECRETS.md`。
+- 本地快速启动可复制模板：`cp evn/.env.example evn/.env`；完整说明见 `docs/环境变量与密钥.md`。
 - 无 GitLab / 无 LLM 密钥时仍可跑冒烟测试；`POST /review` 需要有效的 `AICR_BOT_TOKEN`、`GITLAB_URL` 及 `LLM_API_KEY` 等。
 
 ### 系统依赖（Ubuntu / Debian Cloud VM）

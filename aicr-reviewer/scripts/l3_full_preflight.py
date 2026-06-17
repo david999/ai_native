@@ -21,7 +21,7 @@ AICR_ROOT = REPO_ROOT / "aicr-reviewer"
 ENV_DIR = REPO_ROOT / "evn"
 ENV_FILE = ENV_DIR / ".env"
 ENV_EXAMPLE = ENV_DIR / ".env.example"
-RUN_LOG_TEMPLATE = REPO_ROOT / "docs" / "templates" / "l3-full-run-log.md"
+RUN_LOG_TEMPLATE = REPO_ROOT / "docs" / "templates" / "L3运行记录模板.md"
 AICR_HEALTH_DETAIL = "http://localhost:8001/health/detail"
 
 _PLACEHOLDER_RE = re.compile(r"(\.\.\.|xxxx|your[-_]?|changeme|replace[-_]?me|todo|placeholder)", re.I)

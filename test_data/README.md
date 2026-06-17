@@ -34,7 +34,7 @@ git clone http://localhost:8000/java_group/spring-cloud-demo.git
 
 ## 固定测试场景
 
-场景定义在 `fixtures/scenarios/`；**每次验收应用相同 patch**，不随机生成代码。详见 [docs/ACCEPTANCE_TESTING.md](../docs/ACCEPTANCE_TESTING.md)。
+场景定义在 `fixtures/scenarios/`；**每次验收应用相同 patch**，不随机生成代码。详见 [docs/测试与验收.md](../docs/测试与验收.md)。
 
 ```powershell
 cd E:\ai_native\aicr-reviewer
@@ -48,7 +48,7 @@ cd E:\ai_native\aicr-reviewer
 业务仓库 `.gitlab-ci.yml` 引用：
 
 - [`aicr-reviewer/ci/gitlab-ci.snippet.yml`](../aicr-reviewer/ci/gitlab-ci.snippet.yml)
-- [docs/CI_REVIEW_PIPELINE.md](../docs/CI_REVIEW_PIPELINE.md)
+- [docs/CI评审流水线.md](../docs/CI评审流水线.md)
 
 | CI 变量 | 值 |
 |---------|-----|
@@ -57,5 +57,5 @@ cd E:\ai_native\aicr-reviewer
 
 ## 全链路验收
 
-- 分层手册：[docs/LOCAL_PC_VERIFICATION.md](../docs/LOCAL_PC_VERIFICATION.md)
-- 一键脚本：[docs/ACCEPTANCE_TESTING.md](../docs/ACCEPTANCE_TESTING.md)
+- 分层手册：[docs/测试与验收.md](../docs/测试与验收.md)
+- 一键脚本：[docs/测试与验收.md](../docs/测试与验收.md)
