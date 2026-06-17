@@ -1502,7 +1502,7 @@ def test_prompt_matrix_exit_code():
     def _fail503():
         return {
             "http_status": 503,
-            "error": "MOCK matrix failure: REVIEW_API_SECRET not configured",
+            "error": "MOCK (smoke test): simulated 503 - REVIEW_API_SECRET not configured",
             "review_completed": False,
             "score": 0,
             "issues": [],
@@ -1511,7 +1511,7 @@ def test_prompt_matrix_exit_code():
     def _missing_template():
         return {
             "http_status": 400,
-            "error": "MOCK matrix failure: unknown template",
+            "error": "MOCK (smoke test): simulated 400 - unknown template",
             "review_completed": False,
             "score": 0,
             "issues": [],
@@ -1550,11 +1550,13 @@ def test_prompt_matrix_exit_code():
                             side_effect=[_ok(), _fail503()],
                         ):
                             assert pmt.main() == 1
-            summary = __import__("json").loads((out2 / "matrix_summary.json").read_text())
+            summary = __import__("json").loads(
+                (out2 / "matrix_summary.json").read_text(encoding="utf-8")
+            )
             assert summary["failed"] == 1
             assert summary["ok"] is False
             assert any(
-                "MOCK matrix failure" in str(r.get("failure_reason", ""))
+                "MOCK (smoke test)" in str(r.get("failure_reason", ""))
                 for r in summary.get("results", [])
             )
         finally:

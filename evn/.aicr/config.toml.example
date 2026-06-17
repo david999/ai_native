@@ -2,15 +2,21 @@
 # 环境变量优先于本文件；密钥仍应放在 evn/.env
 
 [review]
+# CI 门禁分数线（可被环境变量 AICR_SCORE_THRESHOLD 覆盖）
 score_threshold = 60
+# 低分或存在 critical/major 时二次 LLM reflection
 self_reflection = true
+# 丢弃 diff hunk 外的 issue
 filter_issues_to_diff = true
 
 [tools]
+# 启用 POST /describe
 describe_enabled = true
 # 为 true 时 POST /describe 可将生成内容写回 MR 描述
 describe_update_mr = false
+# 启用 POST /changelog
 changelog_enabled = true
+# 启用 MR Note 评论对话（Webhook）
 ask_enabled = true
 # describe 写回 MR 后，在此秒数内跳过 MR update webhook 触发的全量评审
 suppress_review_after_describe = true
