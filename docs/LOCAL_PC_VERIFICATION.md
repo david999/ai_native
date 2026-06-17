@@ -315,6 +315,10 @@ curl -s -X POST http://localhost:8001/webhook/gitlab \
 |------|------|
 | `ensurepip is not available` | Linux 安装 `python3.12-venv`（见 §1.3） |
 | PowerShell 无法执行脚本 | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| `run_acceptance.ps1` 一启动 ParserError、字符串乱码 | 仓库内 `.ps1` 须 **UTF-8 BOM**（Windows PowerShell 5.1 读无 BOM 中文会解析失败）；拉最新代码后重试 |
+| 各场景 `validate.json` 为 `ok: true`，但进度/报告写「场景套件失败」、P4–P8 被跳过 | 旧版将 Python stdout 混入 PowerShell 返回值；拉最新 `run_acceptance.ps1` 后重跑 L3-full |
+| `acceptance.log` 含 GitLab token / 密钥片段 | 跑后检查 `test-results/<run>/acceptance.log`，勿提交；若泄露请轮换 PAT；bootstrap 已脱敏 remote URL |
+| preflight 报 AICR `:8001` 连接拒绝 | **AICR Reviewer** = 本仓库 FastAPI（uvicorn）；L3-full 会**自动后台启动**；或手动 `cd aicr-reviewer; .\scripts\run_local.ps1` |
 | 端口 8001 被占用 | 结束旧 uvicorn 进程，或临时改 `run_local` 中的 `--port` |
 | `/review` 返回 503「secret not configured」 | 设置 `REVIEW_API_SECRET`，或本地设 `REVIEW_API_ALLOW_INSECURE=1` |
 | `/review` 返回 401 | Header 带 `X-AICR-Secret` 或 `Authorization: Bearer <secret>` |

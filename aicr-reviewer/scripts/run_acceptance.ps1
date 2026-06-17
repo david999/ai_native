@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("L1", "L2", "L3", "L3-standard", "L3-full", "daily", "all")]
     [string]$Level = "daily",
     [string]$RecordDir = "",
@@ -15,6 +15,7 @@ $ScriptDir = $PSScriptRoot
 $AicrRoot = Split-Path -Parent $ScriptDir
 $RepoRoot = Split-Path -Parent $AicrRoot
 $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+. (Join-Path $PSScriptRoot "acceptance_helpers.ps1")
 
 function Import-AicrEnv {
     # OS 环境变量（User/Machine）优先，evn/.env 仅回填缺省
@@ -383,6 +384,12 @@ function Ensure-AicrRunning {
         $needRestart = $true
     } elseif ($RequireLlm -and -not (Test-AicrReviewReady $detail)) {
         $needRestart = $true
+    } elseif ($RequireLlm -and $detail.review_dry_run) {
+        $dryEnv = [Environment]::GetEnvironmentVariable('REVIEW_DRY_RUN', 'Process')
+        if ($dryEnv -ne '1') {
+            Write-Host "AICR review_dry_run=true but env REVIEW_DRY_RUN=$dryEnv; restarting..."
+            $needRestart = $true
+        }
     }
 
     if ($needRestart -and -not $SkipAicrStart) {
@@ -470,15 +477,28 @@ function Initialize-L3Run {
         return $null
     }
     if (-not $SkipGitlab) {
-        & (Join-Path $RepoRoot "test_data\scripts\ensure_gitlab.ps1")
-        if ($LASTEXITCODE -ne 0) {
+        if ((Invoke-AcceptanceProcess { & (Join-Path $RepoRoot "test_data\scripts\ensure_gitlab.ps1") }) -ne 0) {
             $L3Skipped.Value = $true
             return $null
         }
     }
-    & (Join-Path $RepoRoot "test_data\scripts\bootstrap_demo.ps1")
-    if ($LASTEXITCODE -ne 0) { return $null }
+    if ((Invoke-AcceptanceProcess { & (Join-Path $RepoRoot "test_data\scripts\bootstrap_demo.ps1") }) -ne 0) {
+        return $null
+    }
     return $l3Dir
+}
+
+function Show-ScenarioFailureDetail {
+    param(
+        [string]$ScenarioId,
+        [string]$ScenDir
+    )
+    if (-not (Test-Path $ScenDir)) { return }
+    Write-Host ""
+    Write-Host "--- 场景失败详情 ($ScenarioId) ---" -ForegroundColor Yellow
+    Invoke-AcceptancePython (Join-Path $ScriptDir "scenario_failure_report.py") `
+        --scenario-dir $ScenDir --scenario-id $ScenarioId --write-md | Out-Null
+    Write-Host "---" -ForegroundColor Yellow
 }
 
 function Invoke-L3ScenarioBaseline {
@@ -498,50 +518,52 @@ function Invoke-L3ScenarioBaseline {
         "--report-json", $applyReport
     )
     if ($BranchOverride) { $applyArgs += @("--branch", $BranchOverride) }
-    & $venvPy @applyArgs
-    if ($LASTEXITCODE -ne 0) { return @{ ok = $false; scenario_id = $ScenarioId } }
+    if ((Invoke-AcceptancePython @applyArgs) -ne 0) {
+        Show-ScenarioFailureDetail -ScenarioId $ScenarioId -ScenDir $scenDir
+        return (New-AcceptanceResult @{ ok = $false; scenario_id = $ScenarioId })
+    }
 
     $apply = Get-Content $applyReport -Raw | ConvertFrom-Json
     $branch = $apply.scenarios[0].branch
     $mrReport = Join-Path $scenDir "mr.json"
-    & $venvPy (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
-        --source-branch $branch --target-branch main `
-        --title "AICR acceptance $ScenarioId" --report-json $mrReport
-    if ($LASTEXITCODE -ne 0) { return @{ ok = $false; scenario_id = $ScenarioId } }
+    if ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
+            --source-branch $branch --target-branch main `
+            --title "AICR acceptance $ScenarioId" --report-json $mrReport) -ne 0) {
+        Show-ScenarioFailureDetail -ScenarioId $ScenarioId -ScenDir $scenDir
+        return (New-AcceptanceResult @{ ok = $false; scenario_id = $ScenarioId })
+    }
 
     $mr = Get-Content $mrReport -Raw | ConvertFrom-Json
     $reviewJson = Join-Path $scenDir "review.json"
-    & $venvPy (Join-Path $ScriptDir "review_single.py") `
-        --project-id $mr.project_id --mr-iid $mr.mr_iid `
-        --force-full --output $reviewJson --scenario-id $ScenarioId
-    if ($LASTEXITCODE -ne 0) { return @{ ok = $false; scenario_id = $ScenarioId } }
+    if ((Invoke-AcceptancePython (Join-Path $ScriptDir "review_single.py") `
+            --project-id $mr.project_id --mr-iid $mr.mr_iid `
+            --force-full --output $reviewJson --scenario-id $ScenarioId) -ne 0) {
+        Show-ScenarioFailureDetail -ScenarioId $ScenarioId -ScenDir $scenDir
+        return (New-AcceptanceResult @{ ok = $false; scenario_id = $ScenarioId })
+    }
 
     $review = Get-Content $reviewJson -Raw | ConvertFrom-Json
     $validateReport = Join-Path $scenDir "validate.json"
-    & $venvPy (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
-        --scenario-id $ScenarioId --review-json $reviewJson `
-        --report-json $validateReport --tolerance 5
-    $valOk = ($LASTEXITCODE -eq 0)
+    $valOk = ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
+            --scenario-id $ScenarioId --review-json $reviewJson `
+            --report-json $validateReport --tolerance 5) -eq 0)
     if (-not $valOk) {
         Write-Host "Validation failed for $ScenarioId; retrying review once..."
-        & $venvPy (Join-Path $ScriptDir "review_single.py") `
-            --project-id $mr.project_id --mr-iid $mr.mr_iid `
-            --force-full --output $reviewJson --scenario-id $ScenarioId
-        if ($LASTEXITCODE -eq 0) {
-            & $venvPy (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
-                --scenario-id $ScenarioId --review-json $reviewJson `
-                --report-json $validateReport --tolerance 5
-            $valOk = ($LASTEXITCODE -eq 0)
+        if ((Invoke-AcceptancePython (Join-Path $ScriptDir "review_single.py") `
+                --project-id $mr.project_id --mr-iid $mr.mr_iid `
+                --force-full --output $reviewJson --scenario-id $ScenarioId) -eq 0) {
+            $valOk = ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
+                    --scenario-id $ScenarioId --review-json $reviewJson `
+                    --report-json $validateReport --tolerance 5) -eq 0)
         }
     }
 
     $publishOk = $true
     if ($AssertPublish -and $ScenarioId -eq "S02_npe_optional") {
         $pubReport = Join-Path $scenDir "publish.json"
-        & $venvPy (Join-Path $RepoRoot "test_data\scripts\assert_gitlab_publish.py") `
-            --project-id $mr.project_id --mr-iid $mr.mr_iid `
-            --expected-score $review.score --report-json $pubReport
-        $publishOk = ($LASTEXITCODE -eq 0)
+        $publishOk = ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\assert_gitlab_publish.py") `
+                --project-id $mr.project_id --mr-iid $mr.mr_iid `
+                --expected-score $review.score --report-json $pubReport) -eq 0)
     }
 
     $gitlabUrl = [Environment]::GetEnvironmentVariable('GITLAB_URL', 'Process')
@@ -571,13 +593,16 @@ function Invoke-L3ScenarioBaseline {
     [void]$ReleaseData.scenarios.Add($entry)
 
     $ok = $valOk -and $publishOk
+    if (-not $ok) {
+        Show-ScenarioFailureDetail -ScenarioId $ScenarioId -ScenDir $scenDir
+    }
     if (-not $valOk) {
         if ($ReleaseData.warnings -isnot [System.Collections.ArrayList]) {
             [void]($ReleaseData.warnings = [System.Collections.ArrayList]@())
         }
         [void]$ReleaseData.warnings.Add("Scenario $ScenarioId validation flaky/failed")
     }
-    return @{ ok = $ok; entry = $entry; mr = $mr; review = $review }
+    return (New-AcceptanceResult @{ ok = $ok; entry = $entry; mr = $mr; review = $review })
 }
 
 function Invoke-L3StandardSuite {
@@ -594,13 +619,15 @@ function Invoke-L3StandardSuite {
         -SkipGitlab:$SkipGitlab -L3Skipped ([ref]$l3Skipped)
     if ($l3Skipped) {
         Stop-AcceptanceTimingPhase -Ok $false -Skipped -Reason "GitLab not ready" | Out-Null
-        if ($Level -in @("L3-standard", "L3-full")) { return @{ ok = $false; skipped = $true } }
+        if ($Level -in @("L3-standard", "L3-full")) {
+            return (New-AcceptanceResult @{ ok = $false; skipped = $true })
+        }
         Write-Warning "L3 skipped: GitLab not ready"
-        return @{ ok = $true; skipped = $true }
+        return (New-AcceptanceResult @{ ok = $true; skipped = $true })
     }
     if (-not $l3Dir) {
         Stop-AcceptanceTimingPhase -Ok $false | Out-Null
-        return @{ ok = $false; skipped = $false }
+        return (New-AcceptanceResult @{ ok = $false; skipped = $false })
     }
     Stop-AcceptanceTimingPhase -Ok $true | Out-Null
 
@@ -611,7 +638,7 @@ function Invoke-L3StandardSuite {
         Write-Host "=== Scenario $sid (baseline) ==="
         Start-AcceptanceTimingPhase -Id "scenario_$sid" -Label "场景 $sid"
         $r = Invoke-L3ScenarioBaseline -ScenarioId $sid -L3Dir $l3Dir -ReleaseData $ReleaseData -AssertPublish:$AssertPublish
-        $scenOk = ($r -is [hashtable]) -and $r['ok']
+        $scenOk = Get-InvokeHashtableOk -Result $r
         Stop-AcceptanceTimingPhase -Ok $scenOk | Out-Null
         if (-not $scenOk) { $suiteOk = $false }
     }
@@ -621,7 +648,7 @@ function Invoke-L3StandardSuite {
     $ReleaseData.phases = @{}
     $ReleaseData.phases["scenario_suite"] = @{ ok = $suiteOk }
     Write-JsonNoBom -Path (Join-Path $l3Dir "release_data.json") -Object $ReleaseData
-    return @{ ok = $suiteOk; l3Dir = $l3Dir; skipped = $false }
+    return (New-AcceptanceResult @{ ok = $suiteOk; l3Dir = $l3Dir; skipped = $false })
 }
 
 function Invoke-L3FullExtras {
@@ -636,10 +663,9 @@ function Invoke-L3FullExtras {
     Write-Host "=== S02 prompt matrix ==="
     Start-AcceptanceTimingPhase -Id "s02_matrix" -Label "S02 三模板矩阵"
     $matrixDir = Join-Path $L3Dir "S02_npe_optional_matrix"
-    & $venvPy (Join-Path $ScriptDir "prompt_matrix_test.py") `
+    $matrixOk = ((Invoke-AcceptancePython (Join-Path $ScriptDir "prompt_matrix_test.py") `
         --project-id $S02Mr.project_id --mr-iid $S02Mr.mr_iid `
-        --scenario-id "S02_npe_optional" --output-dir $matrixDir --force-full
-    $matrixOk = ($LASTEXITCODE -eq 0)
+        --scenario-id "S02_npe_optional" --output-dir $matrixDir --force-full) -eq 0)
     if (-not $matrixOk) { $extrasOk = $false }
     $matrixSummary = $null
     $msPath = Join-Path $matrixDir "matrix_summary.json"
@@ -667,8 +693,7 @@ function Invoke-L3FullExtras {
         CachedCompleted = [bool]$S02Review.review_completed
     }
     if ($gateSecret) { $gateArgs['Secret'] = $gateSecret }
-    & (Join-Path $ScriptDir "ci_review_gate.ps1") @gateArgs
-    $gateExit = $LASTEXITCODE
+    $gateExit = Invoke-AcceptanceProcess { & (Join-Path $ScriptDir "ci_review_gate.ps1") @gateArgs }
     $gateOk = ($gateExit -eq 1)
     if (-not $gateOk) {
         Write-Warning "CI gate expected exit 1 (low score block) but got $gateExit"
@@ -687,20 +712,18 @@ function Invoke-L3FullExtras {
     $s06Branch = "aicr-test/S06_incremental"
     $s06Dir = Join-Path $L3Dir "S06_incremental"
     New-Item -ItemType Directory -Path $s06Dir -Force | Out-Null
-    & $venvPy (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
-        --scenario "S02_npe_optional" --branch $s06Branch `
-        --report-json (Join-Path $s06Dir "apply1.json")
-    if ($LASTEXITCODE -ne 0) {
+    if ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
+            --scenario "S02_npe_optional" --branch $s06Branch `
+            --report-json (Join-Path $s06Dir "apply1.json")) -ne 0) {
         $extrasOk = $false
         Stop-AcceptanceTimingPhase -Ok $false | Out-Null
         Add-SkippedTimingPhase -Id "phase_c" -Label "Phase C 抽检" -Reason "S06 incremental failed"
     }
     else {
-        & $venvPy (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
-            --source-branch $s06Branch --target-branch main `
-            --title "AICR acceptance S06_incremental" `
-            --report-json (Join-Path $s06Dir "mr.json")
-        if ($LASTEXITCODE -ne 0) {
+        if ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
+                --source-branch $s06Branch --target-branch main `
+                --title "AICR acceptance S06_incremental" `
+                --report-json (Join-Path $s06Dir "mr.json")) -ne 0) {
             $extrasOk = $false
             Stop-AcceptanceTimingPhase -Ok $false | Out-Null
             Add-SkippedTimingPhase -Id "phase_c" -Label "Phase C 抽检" -Reason "S06 MR failed"
@@ -708,26 +731,23 @@ function Invoke-L3FullExtras {
         else {
             $s06Mr = Get-Content (Join-Path $s06Dir "mr.json") -Raw | ConvertFrom-Json
             $r1 = Join-Path $s06Dir "review1.json"
-            & $venvPy (Join-Path $ScriptDir "review_single.py") `
-                --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
-                --force-full --output $r1 --scenario-id "S06_incremental"
-            $firstOk = ($LASTEXITCODE -eq 0)
+            $firstOk = ((Invoke-AcceptancePython (Join-Path $ScriptDir "review_single.py") `
+                    --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
+                    --force-full --output $r1 --scenario-id "S06_incremental") -eq 0)
             $firstReview = Get-Content $r1 -Raw | ConvertFrom-Json
 
-            & $venvPy (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
+            Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
                 --scenario "S06_incremental" --branch $s06Branch --incremental `
-                --report-json (Join-Path $s06Dir "apply2.json")
+                --report-json (Join-Path $s06Dir "apply2.json") | Out-Null
             $r2 = Join-Path $s06Dir "review2.json"
-            & $venvPy (Join-Path $ScriptDir "review_single.py") `
-                --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
-                --no-force-full --output $r2 --scenario-id "S06_incremental"
-            $secondOk = ($LASTEXITCODE -eq 0)
+            $secondOk = ((Invoke-AcceptancePython (Join-Path $ScriptDir "review_single.py") `
+                    --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
+                    --no-force-full --output $r2 --scenario-id "S06_incremental") -eq 0)
             $secondReview = Get-Content $r2 -Raw | ConvertFrom-Json
 
-            & $venvPy (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
-                --scenario-id "S06_incremental" --review-json $r2 `
-                --report-json (Join-Path $s06Dir "validate2.json") --tolerance 5
-            $val2Ok = ($LASTEXITCODE -eq 0)
+            $val2Ok = ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\validate_scenario.py") `
+                    --scenario-id "S06_incremental" --review-json $r2 `
+                    --report-json (Join-Path $s06Dir "validate2.json") --tolerance 5) -eq 0)
             $s06Ok = $firstOk -and $secondOk -and $val2Ok
             if (-not $s06Ok) { $extrasOk = $false }
             $ReleaseData.incremental = @{
@@ -743,10 +763,9 @@ function Invoke-L3FullExtras {
             Write-Host "=== Phase C smoke ==="
             Start-AcceptanceTimingPhase -Id "phase_c" -Label "Phase C 抽检"
             $phaseReport = Join-Path $s06Dir "phase_c.json"
-            & $venvPy (Join-Path $ScriptDir "phase_c_smoke.py") `
-                --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
-                --report-json $phaseReport
-            $phaseOk = ($LASTEXITCODE -eq 0)
+            $phaseOk = ((Invoke-AcceptancePython (Join-Path $ScriptDir "phase_c_smoke.py") `
+                    --project-id $s06Mr.project_id --mr-iid $s06Mr.mr_iid `
+                    --report-json $phaseReport) -eq 0)
             if (-not $phaseOk) { $extrasOk = $false }
             $ReleaseData.phases["phase_c"] = @{ ok = $phaseOk }
             Stop-AcceptanceTimingPhase -Ok $phaseOk | Out-Null
@@ -775,10 +794,21 @@ $meta = @{
 Write-JsonNoBom -Path (Join-Path $RecordDir "meta.json") -Object $meta
 Write-Host "Acceptance run: $RecordDir (level=$Level)"
 
-$venvPy = Join-Path $AicrRoot ".venv\Scripts\python.exe"
+$script:AcceptanceLogPath = Join-Path $RecordDir "acceptance.log"
+$script:AcceptanceTranscriptStarted = $false
+try {
+    Start-Transcript -Path $script:AcceptanceLogPath -Force | Out-Null
+    $script:AcceptanceTranscriptStarted = $true
+    Write-Host "Console log: $script:AcceptanceLogPath"
+} catch {
+    Write-Warning "Could not start transcript (acceptance.log): $_"
+}
+
+$script:AcceptanceVenvPy = Join-Path $AicrRoot ".venv\Scripts\python.exe"
+$venvPy = $script:AcceptanceVenvPy
 if (-not (Test-Path $venvPy)) {
     python -m venv (Join-Path $AicrRoot ".venv")
-    & $venvPy -m pip install -q -r (Join-Path $AicrRoot "requirements.txt")
+    Invoke-AcceptanceProcess { & $venvPy -m pip install -q -r (Join-Path $AicrRoot "requirements.txt") } -Silent | Out-Null
 }
 
 function Should-Run($name) {
@@ -799,11 +829,20 @@ Initialize-AcceptanceProgress -Level $Level
 
 if ($Level -eq "L3-full") {
     Import-AicrEnv
+    if (-not (Ensure-AicrRunning -RecordDir $RecordDir -Meta $meta -RequireLlm)) {
+        Write-Host ""
+        Write-Host "L3-full 已中止：AICR 无法启动或未就绪（含 LLM/鉴权/dry-run）。" -ForegroundColor Red
+        if ($SkipAicrStart) {
+            Write-Host "已指定 -SkipAicrStart：请先手动 cd aicr-reviewer; .\scripts\run_local.ps1" -ForegroundColor Yellow
+        } else {
+            Write-Host "可手动: cd aicr-reviewer; .\scripts\run_local.ps1" -ForegroundColor Yellow
+        }
+        exit 1
+    }
     Write-Host ""
     $preflightReport = Join-Path $RecordDir "preflight.json"
-    & $venvPy (Join-Path $ScriptDir "l3_full_preflight.py") `
-        --record-dir $RecordDir --report-json $preflightReport
-    if ($LASTEXITCODE -ne 0) {
+    if ((Invoke-AcceptancePython (Join-Path $ScriptDir "l3_full_preflight.py") `
+            --record-dir $RecordDir --report-json $preflightReport) -ne 0) {
         Write-Host ""
         Write-Host "L3-full 已中止：请按上方「需要您处理」逐项修复后重跑。" -ForegroundColor Red
         exit 1
@@ -822,8 +861,7 @@ if (Should-Run "L1") {
     Write-Host "=== L1 smoke ==="
     Start-AcceptanceTimingPhase -Id "L1" -Label "L1 冒烟"
     $report = Join-Path $RecordDir "l1-smoke.json"
-    & $venvPy (Join-Path $ScriptDir "smoke_test.py") --report-json $report
-    $l1Ok = ($LASTEXITCODE -eq 0)
+    $l1Ok = ((Invoke-AcceptancePython (Join-Path $ScriptDir "smoke_test.py") --report-json $report) -eq 0)
     if (-not $l1Ok) { $failed = $true }
     Stop-AcceptanceTimingPhase -Ok $l1Ok | Out-Null
 }
@@ -833,8 +871,7 @@ if (-not $failed -and (Should-Run "L2")) {
     Start-AcceptanceTimingPhase -Id "L2" -Label "L2 健康"
     $null = Ensure-AicrRunning -RecordDir $RecordDir -Meta $meta
     $report = Join-Path $RecordDir "l2-health.json"
-    & $venvPy (Join-Path $ScriptDir "health_check.py") --report-json $report
-    $l2Ok = ($LASTEXITCODE -eq 0)
+    $l2Ok = ((Invoke-AcceptancePython (Join-Path $ScriptDir "health_check.py") --report-json $report) -eq 0)
     if (-not $l2Ok) {
         Write-Warning "L2 failed: ensure evn/.env and AICR are running"
         $failed = $true
@@ -852,8 +889,7 @@ if (-not $failed -and (Should-Run "L3")) {
     }
 
     if (-not $failed -and -not $SkipGitlabCheck) {
-        & (Join-Path $RepoRoot "test_data\scripts\ensure_gitlab.ps1")
-        if ($LASTEXITCODE -ne 0) {
+        if ((Invoke-AcceptanceProcess { & (Join-Path $RepoRoot "test_data\scripts\ensure_gitlab.ps1") }) -ne 0) {
             $l3Skipped = $true
             if ($Level -eq "L3") { $failed = $true }
             else { Write-Warning "L3 skipped: GitLab not ready" }
@@ -861,30 +897,31 @@ if (-not $failed -and (Should-Run "L3")) {
     }
 
     if (-not $l3Skipped -and -not $failed) {
-        & (Join-Path $RepoRoot "test_data\scripts\bootstrap_demo.ps1")
+        Invoke-AcceptanceProcess { & (Join-Path $RepoRoot "test_data\scripts\bootstrap_demo.ps1") } | Out-Null
         $scenario = if ($Scenario) { $Scenario } else { "S02_npe_optional" }
         $applyReport = Join-Path $l3Dir "apply.json"
-        & $venvPy (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
-            --scenario $scenario --report-json $applyReport
-        if ($LASTEXITCODE -ne 0) { $failed = $true }
+        if ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\apply_scenario.py") `
+                --scenario $scenario --report-json $applyReport) -ne 0) {
+            $failed = $true
+        }
 
         if (-not $failed) {
             $apply = Get-Content $applyReport -Raw | ConvertFrom-Json
             $branch = $apply.scenarios[0].branch
             $scenarioId = $apply.scenarios[0].scenario_id
             $mrReport = Join-Path $l3Dir "mr.json"
-            & $venvPy (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
-                --source-branch $branch --target-branch main `
-                --title "AICR acceptance $scenarioId" --report-json $mrReport
-            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            if ((Invoke-AcceptancePython (Join-Path $RepoRoot "test_data\scripts\create_or_update_mr.py") `
+                    --source-branch $branch --target-branch main `
+                    --title "AICR acceptance $scenarioId" --report-json $mrReport) -ne 0) {
+                $failed = $true
+            }
 
             if (-not $failed) {
                 $mr = Get-Content $mrReport -Raw | ConvertFrom-Json
                 $matrixDir = Join-Path $l3Dir $scenarioId
-                & $venvPy (Join-Path $ScriptDir "prompt_matrix_test.py") `
-                    --project-id $mr.project_id --mr-iid $mr.mr_iid `
-                    --scenario-id $scenarioId --output-dir $matrixDir --force-full
-                if ($LASTEXITCODE -ne 0) {
+                if ((Invoke-AcceptancePython (Join-Path $ScriptDir "prompt_matrix_test.py") `
+                        --project-id $mr.project_id --mr-iid $mr.mr_iid `
+                        --scenario-id $scenarioId --output-dir $matrixDir --force-full) -ne 0) {
                     Write-Host "L3 matrix failed: one or more templates did not complete review." -ForegroundColor Yellow
                     $failed = $true
                 }
@@ -902,10 +939,11 @@ if (-not $failed -and (Should-Run "L3-standard")) {
     }
     $r = Invoke-L3StandardSuite -RecordDir $RecordDir -Meta $meta -ReleaseData $releaseData `
         -SkipGitlab:$SkipGitlabCheck -AssertPublish:$false
-    if ($r.skipped) {
+    $suite = Get-InvokeHashtableResult -Result $r
+    if ($suite -and $suite.skipped) {
         $l3Skipped = $true
         if ($Level -eq "L3-standard") { $failed = $true }
-    } elseif (-not $r.ok) {
+    } elseif (-not (Get-InvokeHashtableOk -Result $r)) {
         $failed = $true
     }
 }
@@ -922,11 +960,12 @@ if (-not $failed -and (Should-Run "L3-full")) {
         }
         $r = Invoke-L3StandardSuite -RecordDir $RecordDir -Meta $meta -ReleaseData $releaseData `
             -SkipGitlab:$SkipGitlabCheck -AssertPublish
-        if ($r.skipped) {
+        $suite = Get-InvokeHashtableResult -Result $r
+        if ($suite -and $suite.skipped) {
             $l3Skipped = $true
             $failed = $true
             Add-L3FullSkippedExtras -Reason "GitLab not ready"
-        } elseif (-not $r.ok) {
+        } elseif (-not (Get-InvokeHashtableOk -Result $r)) {
             $failed = $true
             Add-L3FullSkippedExtras -Reason "scenario_suite failed"
         } else {
@@ -941,10 +980,10 @@ if (-not $failed -and (Should-Run "L3-full")) {
                     $failed = $true
                     Add-L3FullSkippedExtras -Reason "S02 GitLab publish failed"
                 } else {
-                $s02ReviewPath = Join-Path $r.l3Dir "S02_npe_optional\review.json"
+                $s02ReviewPath = Join-Path $suite.l3Dir "S02_npe_optional\review.json"
                 $s02Review = Get-Content $s02ReviewPath -Raw | ConvertFrom-Json
                 $s02Mr = @{ project_id = $s02.project_id; mr_iid = $s02.mr_iid }
-                if (-not $failed -and -not (Invoke-L3FullExtras -L3Dir $r.l3Dir -ReleaseData $releaseData -S02Mr $s02Mr -S02Review $s02Review)) {
+                if (-not $failed -and -not (Invoke-L3FullExtras -L3Dir $suite.l3Dir -ReleaseData $releaseData -S02Mr $s02Mr -S02Review $s02Review)) {
                     $failed = $true
                 }
                 }
@@ -962,7 +1001,7 @@ if ($Level -eq "L3-full") {
         "--level", "L3-full"
     )
     if ($failed) { $relArgs += "--failed" }
-    & $venvPy @relArgs | Out-Null
+    Invoke-AcceptancePython @relArgs | Out-Null
 }
 
 $reportZhArgs = @(
@@ -971,7 +1010,7 @@ $reportZhArgs = @(
     "--level", $Level
 )
 if ($failed) { $reportZhArgs += "--failed" }
-& $venvPy @reportZhArgs | Out-Null
+Invoke-AcceptancePython @reportZhArgs | Out-Null
 
 $finished = (Get-Date).ToUniversalTime().ToString('o')
 $summary = @{
@@ -984,6 +1023,10 @@ $summary = @{
 Write-JsonNoBom -Path (Join-Path $RecordDir "summary.json") -Object $summary
 
 } finally {
+    if ($script:AcceptanceTranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+        $script:AcceptanceTranscriptStarted = $false
+    }
     if ($script:StartedAicrPid -and -not $KeepAicrRunning) {
         Write-Host "Stopping acceptance-started AICR (pid=$($script:StartedAicrPid))..."
         Stop-Process -Id $script:StartedAicrPid -Force -ErrorAction SilentlyContinue
@@ -997,6 +1040,7 @@ $verdict = if ($failed) { "不通过" } else { "通过" }
 Write-Host ""
 Write-Host "=== 验收结束 === 结论: $verdict | 总用时 $totalElapsed | 报告: $RecordDir" -ForegroundColor $(if ($failed) { "Red" } else { "Green" })
 Write-Host "Done: $RecordDir"
+Write-Host "Console log: acceptance.log"
 Write-Host "Chinese reports: l1-smoke.md, l2-health.md, l3.md, summary.zh.md"
 if ($Level -eq "L3-full") { Write-Host "Delivery report: release.zh.md" }
 Write-Host "View latest: .\.venv\Scripts\python.exe scripts\show_latest_report.py"

@@ -1,4 +1,4 @@
-# 校验 spring-cloud-demo 存在且 remote 指向本地 GitLab
+﻿# 校验 spring-cloud-demo 存在且 remote 指向本地 GitLab
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $DemoDir = Join-Path $RepoRoot "test_data\spring-cloud-demo"

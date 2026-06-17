@@ -1108,7 +1108,11 @@ def test_webhook_accepted():
         "project": {"id": 42},
     }
     with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", "hook-secret"), \
-         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False):
+         patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False), \
+         patch(
+             "app.api.routes._run_orchestrator",
+             return_value={"score": 90, "review_completed": True, "issues": []},
+         ) as mock_orch:
         resp = client.post(
             "/webhook/gitlab",
             json=payload,
@@ -1119,6 +1123,8 @@ def test_webhook_accepted():
     assert body["status"] == "accepted"
     assert body["project_id"] == 42
     assert body["mr_iid"] == 9
+    mock_orch.assert_called_once()
+    assert mock_orch.call_args[0][:2] == (42, 9)
     print("OK webhook accepted")
 
 
@@ -1199,6 +1205,8 @@ def test_webhook_note_ignored():
 
 
 def test_webhook_note_accepted():
+    from unittest.mock import MagicMock
+
     from fastapi.testclient import TestClient
     from main import app
 
@@ -1216,8 +1224,10 @@ def test_webhook_note_accepted():
         "project": {"id": 7},
         "user": {"username": "dev"},
     }
+    mock_gl = MagicMock()
     with patch("app.api.routes.GITLAB_WEBHOOK_SECRET", "hook-secret"), \
          patch("app.api.routes.GITLAB_WEBHOOK_ALLOW_INSECURE", False), \
+         patch("app.gitlab.session.GitLabMRSession", return_value=mock_gl), \
          patch("app.api.routes._run_ask") as mock_ask:
         resp = client.post(
             "/webhook/gitlab",
@@ -1492,7 +1502,16 @@ def test_prompt_matrix_exit_code():
     def _fail503():
         return {
             "http_status": 503,
-            "error": "HTTP Error 503: REVIEW_API_SECRET not configured",
+            "error": "MOCK matrix failure: REVIEW_API_SECRET not configured",
+            "review_completed": False,
+            "score": 0,
+            "issues": [],
+        }
+
+    def _missing_template():
+        return {
+            "http_status": 400,
+            "error": "MOCK matrix failure: unknown template",
             "review_completed": False,
             "score": 0,
             "issues": [],
@@ -1511,7 +1530,7 @@ def test_prompt_matrix_exit_code():
         with patch.object(sys, "argv", argv):
             with patch.object(pmt, "load_dotenv"):
                 with patch.object(pmt, "load_variants", return_value=variants):
-                    with patch.object(pmt, "post_review", side_effect=[_ok(), _ok()]):
+                    with patch("prompt_matrix_test.post_review", side_effect=[_ok(), _ok()]):
                         assert pmt.main() == 0
                     assert (out / "matrix_summary.json").is_file()
 
@@ -1526,11 +1545,18 @@ def test_prompt_matrix_exit_code():
             with patch.object(sys, "argv", argv2):
                 with patch.object(pmt, "load_dotenv"):
                     with patch.object(pmt, "load_variants", return_value=variants):
-                        with patch.object(pmt, "post_review", side_effect=[_ok(), _fail503()]):
+                        with patch(
+                            "prompt_matrix_test.post_review",
+                            side_effect=[_ok(), _fail503()],
+                        ):
                             assert pmt.main() == 1
             summary = __import__("json").loads((out2 / "matrix_summary.json").read_text())
             assert summary["failed"] == 1
             assert summary["ok"] is False
+            assert any(
+                "MOCK matrix failure" in str(r.get("failure_reason", ""))
+                for r in summary.get("results", [])
+            )
         finally:
             import shutil
             shutil.rmtree(out2, ignore_errors=True)
@@ -1549,7 +1575,8 @@ def test_prompt_matrix_exit_code():
                     "load_variants",
                     return_value=[{"id": "real_only"}],
                 ):
-                    assert pmt.main() == 1
+                    with patch("prompt_matrix_test.post_review", side_effect=[_missing_template()]):
+                        assert pmt.main() == 1
     print("OK prompt matrix exit code")
 
 
@@ -1655,6 +1682,26 @@ def test_acceptance_timing():
     print("OK acceptance_timing")
 
 
+def test_acceptance_helpers():
+    import subprocess
+    from pathlib import Path
+
+    ps1 = Path(__file__).resolve().parent / "test_acceptance_helpers.ps1"
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"test_acceptance_helpers.ps1 exit {proc.returncode}\n"
+            f"{proc.stdout}\n{proc.stderr}"
+        )
+    print("OK acceptance_helpers")
+
+
 def test_l3_full_preflight():
     import sys
     import tempfile
@@ -1665,9 +1712,12 @@ def test_l3_full_preflight():
         sys.path.insert(0, str(scripts))
     from l3_full_preflight import (
         _is_placeholder_secret,
+        _resolve_venv_python,
         run_preflight,
         write_abort_artifacts,
     )
+
+    assert _resolve_venv_python() is None or _resolve_venv_python().name in ("python", "python.exe")
 
     assert _is_placeholder_secret("AICR_BOT_TOKEN", "glpat-...", {"AICR_BOT_TOKEN": "glpat-..."})
     assert _is_placeholder_secret("LLM_API_KEY", "", {})
@@ -1680,10 +1730,52 @@ def test_l3_full_preflight():
         assert summary["aborted"] is True
         assert summary["failed"] is True
 
-    result = run_preflight(record_dir=None, skip_infra=True)
+    result = run_preflight(record_dir=None, skip_infra=True, auto_start_aicr=False)
     assert "checks" in result
     assert "infra_ready" in result
     print("OK l3_full_preflight")
+
+
+def test_scenario_failure_report():
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    scripts = Path(__file__).resolve().parent
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from scenario_failure_report import diagnose_scenario_dir, format_diagnosis_text
+
+    with tempfile.TemporaryDirectory() as td:
+        scen = Path(td)
+        (scen / "review.json").write_text(
+            json.dumps(
+                {
+                    "score": 0,
+                    "review_completed": False,
+                    "failure_reason": "LLM timeout",
+                    "summary": "fail-open",
+                    "issues": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (scen / "validate.json").write_text(
+            json.dumps(
+                {
+                    "ok": False,
+                    "errors": ["review_completed=false"],
+                    "warnings": ["score 0 outside range"],
+                    "checks": {"file_hit": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+        d = diagnose_scenario_dir(scen, scenario_id="S01_clean_refactor")
+        text = format_diagnosis_text(d)
+        assert "review_completed=false" in text or "review_completed: False" in text
+        assert "S01_clean_refactor" in text
+    print("OK scenario_failure_report")
 
 
 def _write_smoke_report(path, run_id, entries, failed, total):
@@ -1730,6 +1822,16 @@ if __name__ == "__main__":
         help="Write machine-readable test report to PATH",
     )
     args = parser.parse_args()
+
+    _aicr = Path(__file__).resolve().parents[1]
+    if str(_aicr) not in sys.path:
+        sys.path.insert(0, str(_aicr))
+    try:
+        from app.env_loader import apply_monorepo_env
+
+        apply_monorepo_env()
+    except ImportError:
+        pass
 
     tests = [
         test_parser,
@@ -1813,7 +1915,9 @@ if __name__ == "__main__":
         test_validate_scenario,
         test_assert_gitlab_publish,
         test_acceptance_timing,
+        test_acceptance_helpers,
         test_l3_full_preflight,
+        test_scenario_failure_report,
     ]
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     entries = []

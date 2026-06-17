@@ -1,4 +1,4 @@
-# 确保 Rancher Desktop 容器引擎就绪（L3 验收自动调用，非 Docker Desktop）
+﻿# 确保 Rancher Desktop 容器引擎就绪（L3 验收自动调用，非 Docker Desktop）
 param(
     [int]$MaxAttempts = 60,
     [int]$IntervalSeconds = 5

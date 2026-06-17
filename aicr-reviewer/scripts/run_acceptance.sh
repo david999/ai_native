@@ -14,6 +14,10 @@ cat >"$RECORD_DIR/meta.json" <<EOF
 {"started":"$STARTED","level":"$LEVEL","record_dir":"$RECORD_DIR"}
 EOF
 
+ACCEPTANCE_LOG="$RECORD_DIR/acceptance.log"
+exec > >(tee -a "$ACCEPTANCE_LOG") 2>&1
+echo "Acceptance log: $ACCEPTANCE_LOG"
+
 echo "Acceptance run: $RECORD_DIR (level=$LEVEL)"
 
 cd "$AICR_ROOT"

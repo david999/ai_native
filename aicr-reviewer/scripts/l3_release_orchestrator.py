@@ -250,6 +250,21 @@ def run_standard(
         if not entry["ok"]:
             suite_ok = False
             release["warnings"].append(f"Scenario {sid} validation/publish failed")
+            scen_dir = l3_dir / sid
+            report_py = SCRIPTS / "scenario_failure_report.py"
+            if report_py.is_file() and scen_dir.is_dir():
+                run_cmd(
+                    [
+                        _py(),
+                        str(report_py),
+                        "--scenario-dir",
+                        str(scen_dir),
+                        "--scenario-id",
+                        sid,
+                        "--write-md",
+                    ],
+                    check=False,
+                )
     suite_elapsed = int(time.perf_counter() - suite_t0)
     timing.phases.append(
         {

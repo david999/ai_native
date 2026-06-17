@@ -1,4 +1,4 @@
-# 通过 Rancher Desktop 的 docker compose 启动 GitLab CE（复用 data/config/logs）
+﻿# 通过 Rancher Desktop 的 docker compose 启动 GitLab CE（复用 data/config/logs）
 $ErrorActionPreference = "Stop"
 $GitLabDir = $PSScriptRoot
 $EnsureRancher = Join-Path (Split-Path -Parent (Split-Path -Parent $GitLabDir)) "test_data\scripts\ensure_rancher.ps1"

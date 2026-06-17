@@ -1,4 +1,4 @@
-# 启动本机 GitLab：Rancher Desktop + evn/gitlab compose（非 Docker Desktop）
+﻿# 启动本机 GitLab：Rancher Desktop + evn/gitlab compose（非 Docker Desktop）
 param(
     [string]$Url = ""
 )

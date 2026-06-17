@@ -1,4 +1,4 @@
-# GitLab CI 门禁 PowerShell 版（与 ci_review_gate.sh 语义一致）
+﻿# GitLab CI 门禁 PowerShell 版（与 ci_review_gate.sh 语义一致）
 param(
     [string]$Url = $env:AICR_REVIEW_URL,
     [int]$ProjectId = 0,

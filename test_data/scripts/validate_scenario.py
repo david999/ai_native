@@ -165,10 +165,31 @@ def main() -> int:
     for w in result.get("warnings") or []:
         print(f"WARNING: {w}", file=sys.stderr)
     if result["ok"]:
-        print(f"OK scenario {args.scenario_id}")
+        print(f"OK scenario {args.scenario_id}", file=sys.stderr)
         return 0
+    score = review.get("score")
+    completed = review.get("review_completed")
+    print(
+        f"  review: score={score} review_completed={completed} "
+        f"http_status={review.get('http_status', '—')}",
+        file=sys.stderr,
+    )
+    if review.get("failure_reason"):
+        print(f"  failure_reason: {review['failure_reason']}", file=sys.stderr)
+    if review.get("error"):
+        print(f"  review.error: {review['error']}", file=sys.stderr)
+    summary = (review.get("summary") or "").strip()
+    if summary:
+        if len(summary) > 240:
+            summary = summary[:240] + "…"
+        print(f"  summary: {summary}", file=sys.stderr)
     for err in result["errors"]:
         print(f"FAIL: {err}", file=sys.stderr)
+    print(
+        f"  详见: {args.report_json or review_path} 与同目录 validate.json；"
+        f"可运行 aicr-reviewer/scripts/scenario_failure_report.py --scenario-dir {review_path.parent}",
+        file=sys.stderr,
+    )
     return 1
 
 

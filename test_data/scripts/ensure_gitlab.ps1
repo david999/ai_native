@@ -1,4 +1,4 @@
-# 探测并在需要时启动本地 GitLab（不使用 Docker）
+﻿# 探测并在需要时启动本地 GitLab（不使用 Docker）
 param(
     [string]$Url = "",
     [switch]$NoStart,

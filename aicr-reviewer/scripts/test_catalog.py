@@ -85,7 +85,9 @@ SMOKE_TEST_ZH: dict[str, tuple[str, str]] = {
     "test_validate_scenario": ("L3 验收", "validate_scenario 分数/关键词/文件命中"),
     "test_assert_gitlab_publish": ("L3 验收", "assert_gitlab_publish AICR note 识别"),
     "test_acceptance_timing": ("L3 验收", "acceptance_timing 耗时格式化与 timing.json"),
+    "test_acceptance_helpers": ("L3 验收", "PowerShell acceptance_helpers 管道污染回归"),
     "test_l3_full_preflight": ("L3 验收", "L3-full preflight 占位符与中止 summary"),
+    "test_scenario_failure_report": ("L3 验收", "scenario_failure_report 场景失败诊断"),
 }
 
 L1_REPORT_TITLE_ZH = "L1 冒烟测试报告"

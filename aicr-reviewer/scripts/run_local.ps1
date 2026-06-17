@@ -1,4 +1,4 @@
-# 本地启动 aicr-reviewer（无需 Docker）
+﻿# 本地启动 aicr-reviewer（无需 Docker）
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root

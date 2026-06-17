@@ -236,10 +236,11 @@ class ProgressReporter:
             status = "失败"
         tag = f"[{self.level} {step}/{self.total}]" if step else "[---]"
         remaining = max(0, self.total - step) if step else "?"
+        remain_suffix = "（含后续可能短路跳过）" if skipped else ""
         print(
             f"{tag} <<< {label} {status} {format_duration(seconds)} "
             f"| 总用时 {format_duration(self._elapsed_total())} "
-            f"| 剩余 {remaining} 步"
+            f"| 剩余 {remaining} 步{remain_suffix}"
         )
 
     def skip_remaining(self, phase_ids_labels: list[tuple[str, str]], reason: str) -> None:
