@@ -58,4 +58,4 @@ cd E:\ai_native\aicr-reviewer
 ## 全链路验收
 
 - 分层手册：[docs/测试与验收.md](../docs/测试与验收.md)
-- 一键脚本：[docs/测试与验收.md](../docs/测试与验收.md)
+- L3b 跑前：`test_data/scripts/verify_l3b_runner.ps1`

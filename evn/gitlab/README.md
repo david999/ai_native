@@ -42,6 +42,7 @@ cd E:\ai_native\evn\gitlab
 | `RANCHER_DOCKER_BIN` | `%USERPROFILE%\.rd\bin` |
 | `GITLAB_URL` | `http://localhost:8000` |
 | `GITLAB_IMAGE_MIRROR` | `docker.m.daocloud.io/gitlab/gitlab-ce:latest`（Docker Hub 不可达时由 `start.ps1` 拉取并 tag） |
+| `GITLAB_RUNNER_IMAGE_MIRROR` | `docker.m.daocloud.io/gitlab/gitlab-runner:latest`（Docker Hub 不可达时由 `start_runner.ps1` 拉取并 tag） |
 
 Rancher 建议：**Container Engine = dockerd (moby)**，**Kubernetes 可关闭**。
 
@@ -64,7 +65,24 @@ cd E:\ai_native\evn\gitlab
 
 4. 运行：`.\gitlab-runner-windows-amd64.exe run`
 
-compose 内的 `gitlab-runner` **服务**默认不启动（避免与 Rancher 套娃）；优先用本机 exe。
+compose 内的 `gitlab-runner` **服务**默认不随 L3 自动启动；**不要**直接 `docker compose up -d gitlab-runner`（会拉 Docker Hub）。请用：
+
+```powershell
+cd E:\ai_native\evn\gitlab
+.\start_runner.ps1
+```
+
+若仍失败，可手动：
+
+```powershell
+docker pull docker.m.daocloud.io/gitlab/gitlab-runner:latest
+docker tag docker.m.daocloud.io/gitlab/gitlab-runner:latest gitlab/gitlab-runner:latest
+docker compose up -d gitlab-runner
+```
+
+> **说明**：`gitlab-runner.exe` / `gitlab-runner-windows-amd64.exe` 是 **Windows 本机 Runner（方案 A）**，与 **Docker 镜像 `gitlab/gitlab-runner`** 不是同一个东西。compose 方案需要 **镜像**；本机 exe 约 120MB 已放在 `evn/gitlab-runner/`，无需再从 Hub 下载 exe。
+
+配置目录：`evn/gitlab-runner/config/config.toml`（compose 挂载 `../gitlab-runner/config`）。
 
 ## 与 Docker Desktop 的关系
 
