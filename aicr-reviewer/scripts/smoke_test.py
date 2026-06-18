@@ -1636,6 +1636,256 @@ def test_validate_scenario():
     print("OK validate_scenario")
 
 
+def test_l3_report_common():
+    import tempfile
+
+    from l3_report_common import (
+        infer_review_mode,
+        render_scenario_detail_block,
+        scenario_artifacts,
+    )
+
+    assert infer_review_mode({"summary": "Incremental review since `abc12345`"}) == "incremental"
+    assert infer_review_mode({"summary": "No new commits since last successful review"}) == "skipped"
+    assert infer_review_mode({"summary": "Review completed."}) == "full"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        l3 = root / "l3" / "S02_npe_optional"
+        l3.mkdir(parents=True)
+        review = {
+            "review_completed": True,
+            "score": 42,
+            "system_template": "variants/system_spring_v1_baseline.j2",
+            "system_template_requested": "system_spring_v1_baseline",
+            "prompt_sha256": "a" * 64,
+            "summary": "Optional.orElse(null) NPE risk",
+            "issues": [
+                {
+                    "severity": "major",
+                    "file": "src/main/java/demo/UserService.java",
+                    "line": 10,
+                    "message": "null Optional",
+                }
+            ],
+        }
+        validate = {
+            "ok": True,
+            "errors": [],
+            "checks": {
+                "score_range": [-5.0, 70.0],
+                "keywords_missing": [],
+                "file_hit": True,
+            },
+        }
+        (l3 / "review.json").write_text(json.dumps(review), encoding="utf-8")
+        (l3 / "validate.json").write_text(json.dumps(validate), encoding="utf-8")
+        (l3 / "mr.json").write_text(
+            json.dumps({"web_url": "http://localhost/mr/1", "mr_iid": 2}),
+            encoding="utf-8",
+        )
+        (l3 / "apply.json").write_text(
+            json.dumps(
+                {
+                    "scenarios": [
+                        {
+                            "scenario_id": "S02_npe_optional",
+                            "branch": "aicr-test/S02_npe_optional",
+                            "commit_sha": "deadbeef" * 5,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        art = scenario_artifacts(root / "l3", "S02_npe_optional")
+        assert art["score"] == 42
+        assert art["system_template"].endswith(".j2")
+        block = render_scenario_detail_block(art)
+        text = "\n".join(block)
+        assert "0–65" in text or "0-65" in text or "预期分数" in text
+        assert "a" * 64 in text
+        assert "UserService.java" in text
+    print("OK l3_report_common")
+
+
+def test_l3_report_relax_score():
+    from l3_report_common import score_in_range
+
+    art = {
+        "validate": {
+            "ok": True,
+            "errors": [],
+            "warnings": ["score 10.0 outside [70.0, 105.0] (spec 75-100 ±5)"],
+        }
+    }
+    assert score_in_range(art) is None
+    print("OK l3_report relax_score")
+
+
+def test_write_l3_md_single_scenario():
+    import tempfile
+
+    from report_zh import write_l3_md
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        l3 = root / "l3"
+        scen = l3 / "S02_npe_optional"
+        scen.mkdir(parents=True)
+        (l3 / "apply.json").write_text(
+            json.dumps(
+                {
+                    "scenarios": [
+                        {
+                            "scenario_id": "S02_npe_optional",
+                            "branch": "aicr-test/S02_npe_optional",
+                            "commit_sha": "abc123def456",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        (l3 / "mr.json").write_text(
+            json.dumps(
+                {
+                    "web_url": "http://localhost/mr/2",
+                    "mr_iid": 2,
+                    "source_branch": "aicr-test/S02_npe_optional",
+                    "target_branch": "main",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (scen / "matrix_summary.json").write_text(
+            json.dumps(
+                {
+                    "ok": True,
+                    "passed": 3,
+                    "failed": 0,
+                    "results": [
+                        {
+                            "template_id": "system_spring_v1_baseline",
+                            "ok": True,
+                            "score": 40,
+                            "issue_count": 1,
+                            "system_template": "variants/system_spring_v1_baseline.j2",
+                            "prompt_sha256": "c" * 64,
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        md = write_l3_md(root)
+        assert md is not None
+        assert "aicr-test/S02_npe_optional" in md
+        assert "http://localhost/mr/2" in md or "!2" in md
+        assert "40" in md
+        assert "matrix" in md.lower() or "矩阵" in md
+    print("OK write_l3_md single scenario")
+
+
+def test_write_release_report_fixture():
+    import tempfile
+
+    from write_release_report import write_release_md
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        l3 = root / "l3"
+        scen = l3 / "S02_npe_optional"
+        scen.mkdir(parents=True)
+        (scen / "review.json").write_text(
+            json.dumps(
+                {
+                    "review_completed": True,
+                    "score": 40,
+                    "system_template": "variants/system_spring_v1_baseline.j2",
+                    "system_template_requested": "system_spring_v1_baseline",
+                    "prompt_sha256": "b" * 64,
+                    "issues": [],
+                    "summary": "null Optional",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (scen / "validate.json").write_text(
+            json.dumps({"ok": True, "errors": [], "checks": {"score_range": [-5, 70]}}),
+            encoding="utf-8",
+        )
+        (l3 / "release_data.json").write_text(
+            json.dumps(
+                {
+                    "scenarios": [
+                        {
+                            "scenario_id": "S02_npe_optional",
+                            "score": 40,
+                            "validation_ok": True,
+                            "publish_ok": True,
+                            "mr_url": "http://localhost/mr/1",
+                            "mr_iid": 2,
+                        }
+                    ],
+                    "phases": {"scenario_suite": {"ok": True}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "summary.json").write_text(json.dumps({"finished": "2026-01-01"}), encoding="utf-8")
+        md = write_release_md(root, level="L3-full", failed=False)
+        assert "场景评审总览" in md
+        assert "S02_npe_optional" in md
+        assert "b" * 64 in md
+        assert (root / "release.zh.md").is_file()
+    print("OK write_release_report fixture")
+
+
+def test_collect_l3b_parse_job_log():
+    import sys
+
+    repo = Path(__file__).resolve().parents[2]
+    scripts = repo / "test_data" / "scripts"
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    from collect_l3b_report import parse_job_log
+
+    log_pass = (
+        "Calling reviewer at http://host.docker.internal:8001/review ...\n"
+        "Review completed. Score: 72\n"
+        "Review passed.\n"
+    )
+    p1 = parse_job_log(log_pass)
+    assert p1["score"] == 72.0
+    assert p1["passed"] is True
+    assert p1["fail_open"] is False
+
+    log_block = (
+        "Review completed. Score: 42\n"
+        "ERROR: score 42.0 < threshold 60.0. Pipeline fails to block merge.\n"
+    )
+    p2 = parse_job_log(log_block)
+    assert p2["score"] == 42.0
+    assert p2["threshold"] == 60.0
+    assert p2["blocked"] is True
+
+    log_fo = "WARNING: Reviewer timed out after 120s\nReview skipped (fail-open)\n"
+    p3 = parse_job_log(log_fo)
+    assert p3["fail_open"] is True
+
+    log_mixed = (
+        "WARNING: Running pip as the 'root' user\n"
+        "Review completed. Score: 42\n"
+        "ERROR: score 42.0 < threshold 60.0. Pipeline fails to block merge.\n"
+    )
+    p4 = parse_job_log(log_mixed)
+    assert p4["fail_open"] is False
+    assert p4["blocked"] is True
+    assert p4["score"] == 42.0
+    print("OK collect_l3b parse_job_log")
+
+
 def test_assert_gitlab_publish():
     import sys
     from pathlib import Path
@@ -1929,6 +2179,11 @@ if __name__ == "__main__":
         test_prompt_matrix_template_ok,
         test_prompt_matrix_exit_code,
         test_validate_scenario,
+        test_l3_report_common,
+        test_l3_report_relax_score,
+        test_write_l3_md_single_scenario,
+        test_write_release_report_fixture,
+        test_collect_l3b_parse_job_log,
         test_assert_gitlab_publish,
         test_acceptance_timing,
         test_acceptance_helpers,

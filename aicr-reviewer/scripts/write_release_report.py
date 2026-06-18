@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 
 from acceptance_timing import (
@@ -16,11 +14,21 @@ from acceptance_timing import (
     phase_by_id,
     phase_result_label,
 )
+from l3_report_common import (
+    collect_scenario_dirs,
+    discover_scenario_ids,
+    load_scenario_index,
+    mr_link,
+    read_json,
+    render_ci_gate_section,
+    render_matrix_section,
+    render_s06_section,
+    render_scenario_detail_block,
+    render_scenario_summary_table_row,
+    scenario_artifacts,
+)
 
-def _read_json(path: Path) -> dict | list | None:
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8-sig"))
+DEFAULT_SCORE_THRESHOLD = 60
 
 
 def _git_head(repo: Path) -> str:
@@ -37,15 +45,8 @@ def _git_head(repo: Path) -> str:
         return "unknown"
 
 
-def _mr_link(mr_url: str, mr_iid: int | str | None) -> str:
-    if not mr_url:
-        return "—"
-    label = f"!{mr_iid}" if mr_iid else "MR"
-    return f"[{label}]({mr_url})"
-
-
 def _failure_reason(record_dir: Path, scenario_id: str, scenario: dict) -> str:
-    validate = _read_json(record_dir / "l3" / scenario_id / "validate.json")
+    validate = read_json(record_dir / "l3" / scenario_id / "validate.json")
     if isinstance(validate, dict):
         errors = validate.get("errors") or []
         if errors:
@@ -71,12 +72,16 @@ def _gate_note(phase_id: str, release_phases: dict, timing_phase: dict | None) -
     if phase_id == "scenario_suite" and not rp:
         return ""
     if phase_id == "ci_gate" and rp:
+        parts = []
         if rp.get("cached"):
-            return "基于 S02 baseline 缓存分数"
+            parts.append("S02 缓存分数")
         exp = rp.get("expected_exit")
         got = rp.get("exit_code")
         if exp is not None and got is not None:
-            return f"exit {got}（预期 {exp}）"
+            parts.append(f"exit {got}（预期 {exp}）")
+        if rp.get("cached_score") is not None:
+            parts.append(f"score={rp['cached_score']}")
+        return "；".join(parts) if parts else ""
     if phase_id == "L1" and not rp:
         return ""
     if phase_id == "L2" and not rp:
@@ -164,11 +169,12 @@ def _phase_result(
 
 def write_release_md(record_dir: Path, *, level: str, failed: bool) -> str:
     record_dir = Path(record_dir)
-    meta = _read_json(record_dir / "meta.json") or {}
-    summary = _read_json(record_dir / "summary.json") or {}
-    l1 = _read_json(record_dir / "l1-smoke.json") or {}
-    l2 = _read_json(record_dir / "l2-health.json") or {}
-    release_data = _read_json(record_dir / "l3" / "release_data.json") or {}
+    l3_dir = record_dir / "l3"
+    meta = read_json(record_dir / "meta.json") or {}
+    summary = read_json(record_dir / "summary.json") or {}
+    l1 = read_json(record_dir / "l1-smoke.json") or {}
+    l2 = read_json(record_dir / "l2-health.json") or {}
+    release_data = read_json(l3_dir / "release_data.json") or {}
     timing = load_timing(record_dir)
 
     l1_ok = l1.get("failed", 1) == 0 if l1 else None
@@ -237,69 +243,76 @@ def write_release_md(record_dir: Path, *, level: str, failed: bool) -> str:
             note = f"{l1.get('passed', 0)}/{l1.get('total', 0)} 项"
         lines.append(f"| {label} | {result} | {duration} | {note} |")
 
-    lines.extend(["", "## 场景明细", ""])
-    scenarios = list(release_data.get("scenarios") or [])
-    scenarios.sort(
-        key=lambda s: (
-            0 if s.get("validation_ok") and s.get("publish_ok", True) else 1,
-            s.get("scenario_id", ""),
+    # --- 场景总览表 ---
+    lines.extend(["", "## 场景评审总览", ""])
+    release_by_id = {
+        s.get("scenario_id", ""): s for s in (release_data.get("scenarios") or [])
+    }
+    scenario_ids = discover_scenario_ids(l3_dir, release_by_id)
+
+    if scenario_ids:
+        lines.append(
+            "| 场景 | 预期分数 | 实际分数 | 校验 | 生效模板 | 模式 | MR | 备注 |"
         )
-    )
-    if scenarios:
-        lines.append("| 场景 | 分数 | 校验 | MR | 失败原因 |")
-        lines.append("|------|------|------|-----|----------|")
-        for s in scenarios:
-            sid = s.get("scenario_id", "")
-            reason = _failure_reason(record_dir, sid, s)
-            if s.get("validation_ok") and s.get("publish_ok", True):
-                reason = reason or "—"
+        lines.append("|------|----------|----------|------|----------|------|-----|------|")
+        for sid in scenario_ids:
+            art = scenario_artifacts(l3_dir, sid)
+            row = release_by_id.get(sid)
             lines.append(
-                f"| `{sid}` | {s.get('score', '')} | "
-                f"{'通过' if s.get('validation_ok') else '失败'} | "
-                f"{_mr_link(s.get('mr_url', ''), s.get('mr_iid'))} | {reason} |"
+                render_scenario_summary_table_row(
+                    art, release_row=row, record_dir=record_dir, scenario_id=sid
+                )
             )
     else:
         lines.append("（无场景数据）")
 
+    # --- 场景明细 ---
+    if scenario_ids:
+        lines.extend(["", "## 场景评审明细", ""])
+        for sid in scenario_ids:
+            art = scenario_artifacts(l3_dir, sid)
+            lines.extend(
+                render_scenario_detail_block(art, release_row=release_by_id.get(sid))
+            )
+
+    # --- S02 矩阵 ---
     matrix = release_data.get("matrix_summary")
     matrix_phase = phase_by_id(timing, "s02_matrix")
+    matrix_dir = l3_dir / "S02_npe_optional_matrix"
     if matrix or matrix_phase:
-        lines.extend(["", "## S02 矩阵", ""])
+        lines.extend(["", "## S02 提示词矩阵（P4）", ""])
         if matrix_phase:
             lines.append(
                 f"- 阶段耗时：**{format_duration(matrix_phase.get('seconds'))}**"
             )
         if matrix:
-            passed = matrix.get("passed", 0)
-            failed_n = matrix.get("failed", 0)
-            lines.append(f"- 通过：{passed}/{passed + failed_n}")
-            lines.append("")
-            lines.append("| 模板 | 分数 | issues | 结果 |")
-            lines.append("|------|------|--------|------|")
-            for r in matrix.get("results") or []:
-                lines.append(
-                    f"| `{r.get('template_id', '')}` | {r.get('score', '')} | "
-                    f"{r.get('issue_count', '')} | "
-                    f"{'通过' if r.get('ok') else '失败'} |"
-                )
+            lines.extend(render_matrix_section(matrix, matrix_dir, include_details=True))
 
+    # --- CI gate ---
+    ci_phase = release_phases.get("ci_gate")
+    if ci_phase:
+        lines.extend(["", "## CI 门禁（P6）", ""])
+        s02_review = read_json(l3_dir / "S02_npe_optional" / "review.json") or {}
+        lines.extend(
+            render_ci_gate_section(ci_phase, s02_review, threshold=DEFAULT_SCORE_THRESHOLD)
+        )
+
+    # --- S06 增量 ---
     incremental = release_data.get("incremental")
     s06_phase = phase_by_id(timing, "s06_incremental")
-    if incremental or s06_phase:
-        lines.extend(["", "## S06 增量", ""])
+    if incremental or s06_phase or (l3_dir / "S06_incremental" / "review2.json").is_file():
+        lines.extend(["", "## S06 增量评审（P7）", ""])
         if s06_phase:
             lines.append(
                 f"- 阶段耗时：**{format_duration(s06_phase.get('seconds'))}**"
             )
-        if incremental:
+        spec = load_scenario_index().get("S06_incremental", {})
+        if spec:
             lines.append(
-                f"- 第一次 review：score={incremental.get('first_score')} "
-                f"sha={(incremental.get('first_sha') or '')[:12]}"
+                f"- 预期分数：**{spec.get('expected_score_min', 0)}–"
+                f"{spec.get('expected_score_max', 100)}**（±5）"
             )
-            lines.append(
-                f"- 第二次 review（增量）：score={incremental.get('second_score')} "
-                f"ok={incremental.get('second_ok')}"
-            )
+        lines.extend(render_s06_section(l3_dir, incremental))
 
     phase_c = phase_by_id(timing, "phase_c")
     pc = release_phases.get("phase_c")
@@ -321,13 +334,14 @@ def write_release_md(record_dir: Path, *, level: str, failed: bool) -> str:
     lines.extend(
         [
             "",
-            "## 签收",
+            "## 运行环境",
             "",
             f"- 执行人：`{meta.get('user', '')}`",
             f"- 完成时间：`{summary.get('finished') or (timing or {}).get('finished') or ''}`",
             f"- Git commit：`{_git_head(record_dir.parent)}`",
             f"- 主机：`{meta.get('hostname', '')}`",
             "",
+            "> 详细 JSON：`l3/<场景>/review.json`、`validate.json`；矩阵见 `l3/S02_npe_optional_matrix/`。",
             "> `test-results/` 已 gitignore；含 LLM 评审结论，请勿提交仓库。",
             "",
         ]

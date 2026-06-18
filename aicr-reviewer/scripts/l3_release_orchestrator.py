@@ -349,6 +349,9 @@ def run_full_extras(
         "exit_code": gate_exit,
         "expected_exit": 1,
         "cached": True,
+        "cached_score": s02_review.get("score"),
+        "cached_completed": bool(s02_review.get("review_completed")),
+        "threshold": int(os.environ.get("AICR_SCORE_THRESHOLD") or 60),
     }
     phase_end(ok=gate_ok)
     if not gate_ok:

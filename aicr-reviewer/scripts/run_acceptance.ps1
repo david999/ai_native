@@ -699,7 +699,26 @@ function Invoke-L3FullExtras {
         Write-Warning "CI gate expected exit 1 (low score block) but got $gateExit"
         $extrasOk = $false
     }
-    $ReleaseData.phases["ci_gate"] = @{ ok = $gateOk; exit_code = $gateExit; expected_exit = 1 }
+    $gateThreshold = 60
+    $envThreshold = [Environment]::GetEnvironmentVariable('AICR_SCORE_THRESHOLD', 'Process')
+    if (-not $envThreshold) {
+        foreach ($scope in @('User', 'Machine')) {
+            $envThreshold = [Environment]::GetEnvironmentVariable('AICR_SCORE_THRESHOLD', $scope)
+            if ($envThreshold) { break }
+        }
+    }
+    if ($envThreshold) {
+        try { $gateThreshold = [int]$envThreshold } catch { }
+    }
+    $ReleaseData.phases["ci_gate"] = @{
+        ok               = $gateOk
+        exit_code        = $gateExit
+        expected_exit    = 1
+        cached           = $true
+        cached_score     = [double]$S02Review.score
+        cached_completed = [bool]$S02Review.review_completed
+        threshold        = $gateThreshold
+    }
     Stop-AcceptanceTimingPhase -Ok $gateOk | Out-Null
 
     Start-AcceptanceTimingPhase -Id "gitlab_publish" -Label "GitLab 发帖（S02）"

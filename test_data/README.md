@@ -59,3 +59,4 @@ cd E:\ai_native\aicr-reviewer
 
 - 分层手册：[docs/测试与验收.md](../docs/测试与验收.md)
 - L3b 跑前：`test_data/scripts/verify_l3b_runner.ps1`
+- L3b 跑后：`test_data/scripts/collect_l3b_report.py --project-id <id> --mr-iid <iid> [--scenario S02_npe_optional]`
