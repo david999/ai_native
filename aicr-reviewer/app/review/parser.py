@@ -74,7 +74,9 @@ class StructuredResponseParser:
                 "severity": str(item.get("severity", "info")),
                 "category": str(item.get("category", "other")),
                 "message": str(item.get("message", "")),
+                "existing_code": str(item.get("existing_code", "")),
                 "suggestion": str(item.get("suggestion", "")),
+                "suggestion_code": str(item.get("suggestion_code", "")),
             })
 
         return {"score": score, "summary": summary, "issues": issues}

@@ -115,6 +115,16 @@ def validate_scenario_result(
     if missing_kw:
         errors.append(f"keywords not found: {missing_kw}")
 
+    any_keywords = [
+        str(kw) if kw is not None else "null" for kw in (spec.get("must_find_any_keywords") or [])
+    ]
+    if any_keywords:
+        matched_any = [kw for kw in any_keywords if kw.lower() in text]
+        checks["keywords_any_required"] = any_keywords
+        checks["keywords_any_matched"] = matched_any
+        if not matched_any:
+            errors.append(f"none of keywords matched (need any of): {any_keywords}")
+
     changed_files = load_scenario_files(scenario_id)
     checks["changed_files"] = changed_files
     paths = issue_paths(review)

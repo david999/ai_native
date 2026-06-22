@@ -25,6 +25,13 @@ REVIEW_API_SECRET=...                     # 生产必填；CI 用 X-AICR-Secret
 REVIEW_API_ALLOW_INSECURE=0               # 仅本地：无 secret 时允许 /review
 ```
 
+评审 **system prompt** 的项目上下文来源（`ContextBuilder`）：
+
+1. 仓库 `.llm/CONTEXT.md`（源/目标分支），不超过 `CONTEXT_MAX_CHARS` 字符
+2. 若未找到 `.llm/CONTEXT.md`，则使用内置 Spring Boot 默认约定
+
+详见 `docs/环境变量与密钥.md`、`docs/大模型评审说明.md`。
+
 启动 uvicorn 时会在日志中输出 Review API 鉴权模式（便于发现误开 `REVIEW_API_ALLOW_INSECURE`）。
 
 ## 本地启动

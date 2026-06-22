@@ -54,7 +54,9 @@ def diagnose_scenario_dir(scen_dir: Path, *, scenario_id: str = "") -> dict:
         hints.append(f"HTTP {review['http_status']} → 查鉴权 REVIEW_API_ALLOW_INSECURE / REVIEW_API_SECRET")
     for err in validate.get("errors") or []:
         if "keywords not found" in str(err):
-            hints.append("关键词未命中 → 对比 manifest must_find_keywords 与 review summary/issues")
+            hints.append(
+                "关键词未命中 → 对比 manifest must_find_keywords / must_find_any_keywords 与 review summary/issues"
+            )
         if "changed files" in str(err) or "file_hit" in str(err):
             hints.append("变更文件未命中 → LLM issue 未指向 fixture 修改路径")
         if "outside" in str(err) and "score" in str(err):

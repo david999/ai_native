@@ -48,10 +48,10 @@ LLM_API_BASE = os.getenv("LLM_API_BASE", "https://wishub-x6.ctyun.cn/v1")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
 LLM_TIMEOUT_SECONDS = int(os.getenv("LLM_TIMEOUT_SECONDS", "120"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "8192"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 
-REVIEW_MAX_INPUT_TOKENS = int(os.getenv("REVIEW_MAX_INPUT_TOKENS", "12000"))
+REVIEW_MAX_INPUT_TOKENS = int(os.getenv("REVIEW_MAX_INPUT_TOKENS", "32000"))
 CONTEXT_MAX_CHARS = int(os.getenv("CONTEXT_MAX_CHARS", "8000"))
 REVIEW_DRY_RUN = os.getenv("REVIEW_DRY_RUN", "0") == "1"
 
@@ -89,6 +89,18 @@ AICR_REFLECTION_SCORE_THRESHOLD = toml_or_env_float(
     "AICR_REFLECTION_SCORE_THRESHOLD",
     deep_get(_DEPLOY_CONFIG, "review", "reflection_score_threshold"),
     SCORE_THRESHOLD,
+)
+# 是否对 critical 问题独立触发 reflection（默认开启，可单独关闭以节省 token）
+AICR_REFLECTION_ON_CRITICAL = toml_or_env_bool(
+    "AICR_REFLECTION_ON_CRITICAL",
+    deep_get(_DEPLOY_CONFIG, "review", "reflection_on_critical"),
+    True,
+)
+# Reflection pass 独立的 temperature（默认比初评更低，降低确认偏误风险）
+AICR_REFLECTION_TEMPERATURE = toml_or_env_float(
+    "AICR_REFLECTION_TEMPERATURE",
+    deep_get(_DEPLOY_CONFIG, "review", "reflection_temperature"),
+    0.1,
 )
 
 # 阶段 C：describe / CHANGELOG / 评论对话 / config.toml
@@ -141,3 +153,4 @@ AICR_DESCRIBE_WEBHOOK_SUPPRESS_SECONDS = int(
 
 GITLAB_WEBHOOK_SECRET = os.getenv("GITLAB_WEBHOOK_SECRET", "")
 GITLAB_WEBHOOK_ALLOW_INSECURE = os.getenv("GITLAB_WEBHOOK_ALLOW_INSECURE", "0") == "1"
+

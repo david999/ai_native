@@ -153,3 +153,65 @@ def filter_issues_to_diff(
             dropped.append(issue)
 
     return kept, dropped
+
+
+def resolve_line_by_existing_code(
+    existing_code: str,
+    changed_files: List[dict],
+    issue_path: str,
+) -> Optional[int]:
+    """通过 existing_code 文本匹配在 diff hunk 中精确定位行号。
+
+    策略：
+    1. 在对应文件的 diff 中逐行搜索 existing_code 的第一行（去除 +/- 前缀）。
+    2. 找到后返回该行的新文件行号。
+    3. 匹配失败时返回 None（调用方可降级使用 LLM 输出的原始行号）。
+    """
+    if not existing_code or not existing_code.strip():
+        return None
+
+    # 取 existing_code 的第一行作为锚点搜索
+    first_line = existing_code.splitlines()[0].strip()
+    if not first_line:
+        return None
+
+    norm_path = _normalize_path(issue_path)
+    target_file: Optional[dict] = None
+    for f in changed_files:
+        candidate = _normalize_path(f.get("new_path") or f.get("old_path") or "")
+        if paths_match(candidate, norm_path):
+            target_file = f
+            break
+
+    if target_file is None:
+        return None
+
+    diff = target_file.get("diff") or ""
+    if not diff.strip():
+        return None
+
+    # 遍历 diff 行，跟踪新文件行号，寻找 existing_code 首行
+    new_line = 0
+    in_hunk = False
+    for raw in diff.splitlines():
+        if raw.startswith("@@"):
+            m = _HUNK_HEADER.match(raw)
+            if m:
+                new_line = int(m.group(1))
+                in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if raw.startswith("---") or raw.startswith("+++"):
+            continue
+        if raw.startswith("-"):
+            # 删除行不计入新文件行号
+            continue
+        # 上下文行（空格开头）或新增行（+开头）
+        code_line = raw[1:] if raw.startswith("+") or raw.startswith(" ") else raw
+        if code_line.strip() == first_line:
+            return new_line
+        if raw.startswith("+") or raw.startswith(" "):
+            new_line += 1
+
+    return None

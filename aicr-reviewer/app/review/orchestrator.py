@@ -8,7 +8,7 @@ from app.config import (
     REVIEW_DRY_RUN,
     SCORE_THRESHOLD,
 )
-from app.review.diff_line_index import filter_issues_to_diff
+from app.review.diff_line_index import filter_issues_to_diff, resolve_line_by_existing_code
 from app.review.reflection import run_reflection, should_reflect
 from app.review.score_utils import reconcile_score
 from app.exceptions import LLMReviewError, NoReviewableChangesError
@@ -27,6 +27,15 @@ from app.utils.redact import redact_secrets
 logger = logging.getLogger("aicr")
 
 _DELETIONS_PLACEHOLDER = "_aicr_deletions_review.md"
+
+
+def _get_tracer():
+    """懒加载 OpenTelemetry tracer；未安装时返回 None。"""
+    try:
+        from opentelemetry import trace
+        return trace.get_tracer("aicr.review")
+    except ImportError:
+        return None
 
 
 class ReviewOrchestrator:
@@ -60,6 +69,35 @@ class ReviewOrchestrator:
         self._system_template_requested = self._system_template_override or ""
         self._last_system_template = ""
         self._last_prompt_sha256 = ""
+
+        tracer = _get_tracer()
+        if tracer is None:
+            return self._run_inner(
+                project_id, mr_iid, extra_diff,
+                force_full=force_full,
+            )
+
+        with tracer.start_as_current_span(
+            "review.run",
+            attributes={
+                "review.project_id": project_id,
+                "review.mr_iid": mr_iid,
+                "review.force_full": force_full,
+            },
+        ):
+            return self._run_inner(
+                project_id, mr_iid, extra_diff,
+                force_full=force_full,
+            )
+
+    def _run_inner(
+        self,
+        project_id: int,
+        mr_iid: int,
+        extra_diff: str = "",
+        *,
+        force_full: bool = False,
+    ) -> Dict[str, Any]:
 
         gl_session = GitLabMRSession(project_id, mr_iid)
         ctx: MRContext = self.context_builder.build(
@@ -437,10 +475,28 @@ class ReviewOrchestrator:
             category = issue.get("category", "other")
             message = issue.get("message", "")
             suggestion = issue.get("suggestion", "")
+            existing_code = issue.get("existing_code", "")
+            suggestion_code = issue.get("suggestion_code", "")
+
+            # 尝试用 existing_code 文本匹配精确定位行号，匹配失败时保留 LLM 原始行号
+            if existing_code and ctx.changed_files:
+                resolved = resolve_line_by_existing_code(
+                    existing_code, ctx.changed_files, file_path
+                )
+                if resolved is not None:
+                    if resolved != line:
+                        logger.debug(
+                            f"existing_code resolved line {line} -> {resolved} "
+                            f"for {file_path}"
+                        )
+                    line = resolved
 
             body = f"**AICR 评审** ({severity}/{category})\n\n{message}"
             if suggestion:
                 body += f"\n\n**建议**: {suggestion}"
+            # 添加 GitLab suggestion 块（一键 Apply）
+            if suggestion_code:
+                body += f"\n\n```suggestion\n{suggestion_code}\n```"
 
             ok = self.publisher.publish_issue(
                 project_id=ctx.project_id,

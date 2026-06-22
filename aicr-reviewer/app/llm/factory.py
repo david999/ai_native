@@ -1,4 +1,9 @@
-"""根据 LLM_PROVIDER 与环境变量创建 OpenAI 兼容客户端。"""
+"""根据 LLM_PROVIDER 与环境变量创建 LLM 客户端。
+
+支持 provider 类型：
+- openai-compatible（ctyun_openai / deepseek / zhipu / openai 及自定义 endpoint）
+- anthropic（Claude 系列，需要 pip install anthropic>=0.25.0）
+"""
 
 import logging
 
@@ -21,7 +26,13 @@ _PROVIDER_MAP = {
     "openai": {
         "api_base": "https://api.openai.com/v1",
     },
+    "anthropic": {
+        "api_base": "",  # Anthropic 使用官方 endpoint，选填 LLM_API_BASE 可覆盖
+    },
 }
+
+# 使用 Anthropic 原生 SDK 的 provider 名称集合
+_ANTHROPIC_PROVIDERS = {"anthropic"}
 
 
 def create_llm_provider(
@@ -32,8 +43,6 @@ def create_llm_provider(
 ) -> LLMProvider:
     preset = _PROVIDER_MAP.get(provider, {})
     api_base = LLM_API_BASE or preset.get("api_base", "")
-    if not api_base:
-        raise ValueError(f"LLM_API_BASE not set and no preset for provider '{provider}'")
 
     if not LLM_API_KEY:
         raise ValueError(f"LLM_API_KEY not set (required for provider '{provider}')")
@@ -47,9 +56,22 @@ def create_llm_provider(
     resolved_temp = LLM_TEMPERATURE if temperature is None else temperature
 
     logger.info(
-        f"Creating LLM provider: {provider}, base={api_base}, "
-        f"model={resolved_model}, temperature={resolved_temp}"
+        f"Creating LLM provider: {provider}, model={resolved_model}, "
+        f"temperature={resolved_temp}"
     )
+
+    if provider in _ANTHROPIC_PROVIDERS:
+        from app.llm.anthropic_compat import AnthropicProvider
+        return AnthropicProvider(
+            api_key=LLM_API_KEY,
+            model=resolved_model,
+            temperature=resolved_temp,
+            api_base=api_base,
+        )
+
+    if not api_base:
+        raise ValueError(f"LLM_API_BASE not set and no preset for provider '{provider}'")
+
     return OpenAICompatibleProvider(
         api_base=api_base,
         api_key=LLM_API_KEY,

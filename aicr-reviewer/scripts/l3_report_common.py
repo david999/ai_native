@@ -129,7 +129,11 @@ def scenario_artifacts(l3_dir: Path, scenario_id: str) -> dict[str, Any]:
             score = f"{min(scores)}–{max(scores)}（{len(results)} 模板）"
 
     keywords_required = checks.get("keywords_required") or spec.get("must_find_keywords") or []
+    keywords_any_required = (
+        checks.get("keywords_any_required") or spec.get("must_find_any_keywords") or []
+    )
     keywords_missing = checks.get("keywords_missing") or []
+    keywords_any_matched = checks.get("keywords_any_matched") or []
 
     return {
         "scenario_id": scenario_id,
@@ -147,7 +151,9 @@ def scenario_artifacts(l3_dir: Path, scenario_id: str) -> dict[str, Any]:
         "expected_max": spec.get("expected_score_max"),
         "validation_ok": validate.get("ok") if isinstance(validate, dict) else None,
         "keywords_required": keywords_required,
+        "keywords_any_required": keywords_any_required,
         "keywords_missing": keywords_missing,
+        "keywords_any_matched": keywords_any_matched,
         "file_hit": checks.get("file_hit"),
         "review_completed": review.get("review_completed") if review else None,
         "system_template_requested": review.get("system_template_requested", ""),
@@ -224,10 +230,14 @@ def render_scenario_detail_block(art: dict, *, release_row: dict | None = None) 
     )
 
     kw_req = art.get("keywords_required") or []
+    kw_any = art.get("keywords_any_required") or []
     if kw_req:
         missing = art.get("keywords_missing") or []
         hit = [k for k in kw_req if k not in missing]
-        lines.append(f"- 关键词：命中 {hit or '—'}；缺失 {missing or '—'}")
+        lines.append(f"- 关键词（全部）：命中 {hit or '—'}；缺失 {missing or '—'}")
+    if kw_any:
+        matched = art.get("keywords_any_matched") or []
+        lines.append(f"- 关键词（任一）：要求 {kw_any}；命中 {matched or '—'}")
     if art.get("file_hit") is not None:
         lines.append(f"- file_hit：**{'是' if art['file_hit'] else '否'}**")
 

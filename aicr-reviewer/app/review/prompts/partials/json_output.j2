@@ -12,7 +12,9 @@ You MUST respond with a JSON object matching this schema:
       "severity": "<critical|major|minor|info>",
       "category": "<null_safety|security|transaction|performance|spring_cloud|api_design|config|other>",
       "message": "<concise description of the problem>",
-      "suggestion": "<optional: how to fix it>"
+      "existing_code": "<exact original code snippet from the diff that contains the issue, 1-3 lines>",
+      "suggestion": "<optional: how to fix it in plain text>",
+      "suggestion_code": "<optional: corrected replacement code for the existing_code snippet, same indentation>"
     }
   ]
 }
@@ -21,6 +23,8 @@ You MUST respond with a JSON object matching this schema:
 Rules:
 - Only report real issues, not style preferences
 - Each issue must have a specific file and line number that appears in the provided diff
+- `existing_code` MUST be an exact verbatim copy of 1-3 lines from the diff (without leading +/- prefix); used to precisely locate the issue
+- `suggestion_code` is optional; when provided it must be a drop-in replacement for `existing_code` with the same indentation
 - severity "critical" = security vulnerability or data loss risk
 - severity "major" = bug or significant design flaw
 - severity "minor" = improvement opportunity

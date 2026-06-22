@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from app.config import (
     AICR_FETCH_FULL_FILE,
@@ -241,6 +241,17 @@ class ContextBuilder:
         return changes
 
     def _load_context_md(self, project, mr) -> str:
+        repo_text = self._fetch_repo_context_md(project, mr)
+        if repo_text:
+            return self._truncate_context(repo_text)
+        
+        logger.info("Using built-in default context (no .llm/CONTEXT.md found)")
+        return self._default_context()
+
+
+    def _fetch_repo_context_md(
+        self, project, mr
+    ) -> Optional[str]:
         for ref in (mr.source_branch, mr.target_branch):
             try:
                 raw = gitlab_call(
@@ -249,19 +260,21 @@ class ContextBuilder:
                     )
                 )
                 content = raw.decode("utf-8", errors="ignore")
-                if len(content) > CONTEXT_MAX_CHARS:
-                    logger.warning(
-                        f".llm/CONTEXT.md ({len(content)} chars) exceeds "
-                        f"CONTEXT_MAX_CHARS={CONTEXT_MAX_CHARS}, truncating"
-                    )
-                    content = content[:CONTEXT_MAX_CHARS]
                 logger.info(f"Loaded .llm/CONTEXT.md from ref={ref}")
                 return content
             except Exception:
                 continue
+        return None
 
-        logger.info("Using built-in default context (no .llm/CONTEXT.md found)")
-        return self._default_context()
+    @staticmethod
+    def _truncate_context(content: str) -> str:
+        if len(content) > CONTEXT_MAX_CHARS:
+            logger.warning(
+                f"Combined context ({len(content)} chars) exceeds "
+                f"CONTEXT_MAX_CHARS={CONTEXT_MAX_CHARS}, truncating"
+            )
+            content = content[:CONTEXT_MAX_CHARS]
+        return content
 
     @staticmethod
     def _default_context() -> str:

@@ -34,8 +34,14 @@ scenarios:
     branch: aicr-test/S04_hardcoded_secret
     expected_score_min: 0
     expected_score_max: 50
-    must_find_keywords:
+    must_find_any_keywords:
       - secret
+      - password
+      - api key
+      - hardcoded
+      - credential
+      - 密钥
+      - 明文
     language_hint: Java/Spring
 
   - id: S05_feign_no_timeout

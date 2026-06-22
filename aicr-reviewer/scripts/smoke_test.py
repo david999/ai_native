@@ -904,6 +904,12 @@ def test_supported_extensions():
     print("OK supported extensions")
 
 
+
+
+
+
+
+
 def test_redact_mr_metadata():
     from app.gitlab.context_builder import ContextBuilder
     from unittest.mock import MagicMock
@@ -1633,6 +1639,26 @@ def test_validate_scenario():
     r7 = validate_scenario_result("S06_incremental", s06_high, tolerance=5.0)
     assert not r7["ok"]
     assert any("outside" in e for e in r7["errors"])
+
+    s04_api_key = {
+        "review_completed": True,
+        "score": 27,
+        "summary": "Plaintext API key in application config",
+        "issues": [
+            {
+                "file": "src/main/resources/application-aicr-test.yml",
+                "message": "Hardcoded API key exposure",
+            }
+        ],
+    }
+    r8 = validate_scenario_result("S04_hardcoded_secret", s04_api_key, tolerance=5.0)
+    assert r8["ok"], r8["errors"]
+    assert "api key" in (r8["checks"].get("keywords_any_matched") or [])
+
+    s04_no_kw = dict(s04_api_key, summary="generic config issue", issues=[])
+    r9 = validate_scenario_result("S04_hardcoded_secret", s04_no_kw, tolerance=5.0)
+    assert not r9["ok"]
+    assert any("none of keywords" in e for e in r9["errors"])
     print("OK validate_scenario")
 
 
