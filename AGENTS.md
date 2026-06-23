@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-**AICR Reviewer**：基于 FastAPI 的 GitLab MR 自动代码评审服务（Python 3 + pip）。核心代码在 `aicr-reviewer/`；共享环境变量在 `evn/.env`（从 `evn/.env.example` 复制，勿提交真实密钥）。
+**AICR Reviewer**：基于 FastAPI 的 GitLab MR 自动代码评审服务（Python 3 + pip）。核心代码在 `aicr-reviewer/`；**OCR GitLab CI**（方案 2，Pipeline 内评审）在独立目录 `ocr-ci/`；共享环境变量在 `evn/.env`（从 `evn/.env.example` 复制，勿提交真实密钥）。
 
 ## Documentation sync
 

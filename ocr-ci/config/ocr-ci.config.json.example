@@ -1,0 +1,16 @@
+{
+  "llm": {
+    "url": "https://wishub-x6.ctyun.cn/v1/chat/completions",
+    "auth_token": "YOUR_LLM_API_KEY",
+    "model": "deepseek-chat",
+    "use_anthropic": false,
+    "extra_body": {
+      "thinking": {
+        "type": "disabled"
+      }
+    }
+  },
+  "gitlab": {
+    "api_token": "glpat-YOUR_AICR_BOT_TOKEN"
+  }
+}

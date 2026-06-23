@@ -1,0 +1,42 @@
+# OpenCodeReview GitLab CI — slim + baked LLM config（镜像内已配置 LLM）
+#
+# LLM 优先级（OCR 原生）：环境变量 > ~/.opencodereview/config.json
+#   本 snippet 不向 Job 注入 OCR_LLM_*，评审使用镜像内 ~/.opencodereview/config.json
+#   若群组/项目仍配置了 OCR_LLM_* Variables，会覆盖镜像 config（按需删除 Variables）
+#
+# 前置：
+#   cd ocr-ci && .\scripts\build_image.ps1
+#   或手动：python scripts/bake_ocr_config.py --from-user-config -o .build/config.json && docker build -t ocr-ci:local .
+#
+# GitLab 发帖 token 已写入镜像 config.json 的 gitlab.api_token 时无需配置
+# GitLab 仅需 OCR_CI_IMAGE（snippet 默认 ocr-ci:local）或使用群组 Variables 覆盖
+
+stages:
+  - review
+
+code-review:
+  stage: review
+  image: $OCR_CI_IMAGE
+  interruptible: true
+  resource_group: mr-review-$CI_MERGE_REQUEST_IID
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: true
+  variables:
+    OCR_CI_IMAGE: "ocr-ci:local"
+    GIT_DEPTH: "0"
+    OCR_POST_SCRIPT: "/usr/local/lib/ocr-ci/post_ocr_to_gitlab.py"
+  script:
+    - ocr version || true
+    - |
+      echo "Reviewing MR: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} against ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      ocr review \
+        --from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" \
+        --to "${CI_COMMIT_SHA}" \
+        --format json \
+        --audience agent \
+        --concurrency 4 \
+        > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
+      echo "OCR review completed."
+      cat /tmp/ocr-result.json
+    - python3 "${OCR_POST_SCRIPT}"

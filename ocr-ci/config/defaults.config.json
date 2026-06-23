@@ -1,0 +1,10 @@
+{
+  "llm": {
+    "use_anthropic": false,
+    "extra_body": {
+      "thinking": {
+        "type": "disabled"
+      }
+    }
+  }
+}

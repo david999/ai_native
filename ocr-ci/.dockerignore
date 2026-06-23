@@ -1,0 +1,9 @@
+# Never ship local secrets to registry by accident; .build/config.json is generated before build.
+# docs/ and *.md are excluded from build context (not needed in image).
+.git
+.gitignore
+docs/
+*.md
+.build/config.json.bak
+.build/ocr-result.json
+.build/ocr-stderr.log

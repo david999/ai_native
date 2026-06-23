@@ -87,6 +87,8 @@ docker compose -f docker-compose.yml \
 
 ## GitLab CI 门禁（Runner 侧）
 
+### AICR 分数门禁
+
 将 `scripts/ci_review_gate.sh` 复制到业务仓库，或在流水线中引用本仓库路径，示例见 `ci/gitlab-ci.snippet.yml`。
 
 ```yaml
@@ -100,6 +102,10 @@ aicr-review:
 ```
 
 脚本逻辑：**仅当** `review_completed=true` **且** `score < AICR_SCORE_THRESHOLD` 时 `exit 1`；HTTP 非 200、curl 失败、鉴权失败、`review_completed=false` 等均放行。
+
+### OCR GitLab CI（方案 2）
+
+OCR CI 相关 snippet、镜像与部署文档已迁至独立目录 **[`ocr-ci/`](../ocr-ci/)**。详见 [ocr-ci/docs/本地部署指南.md](../ocr-ci/docs/本地部署指南.md) 与 [三方案对比](../docs/OCR-GitLab-Webhook集成指南.md#6-三方案横向对比)。
 
 ## 失败策略
 

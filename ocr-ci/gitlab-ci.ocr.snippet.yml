@@ -1,0 +1,50 @@
+# OpenCodeReview GitLab CI — slim（默认，需预构建 OCR CI 镜像）
+#
+# LLM 优先级（OCR 原生）：环境变量 > ~/.opencodereview/config.json
+#   - 本 snippet 通过 GitLab CI/CD Variables 注入环境变量（可覆盖镜像内 config）
+#   - 若 LLM 已在构建镜像时写入 config.json，可改用 gitlab-ci.ocr.snippet.baked.yml
+#
+# 构建镜像：ocr-ci/scripts/build_image.ps1 或见 docs/本地部署指南.md
+# GitLab CI/CD Variable: OCR_CI_IMAGE=ocr-ci:local
+#
+# 模式 A（本文件）：运行时 Variables 配 LLM（覆盖镜像 config，适合多环境/密钥不进镜像）
+#   OCR_LLM_URL, OCR_LLM_AUTH_TOKEN (Masked), OCR_LLM_MODEL (optional), GITLAB_API_TOKEN
+#
+# 模式 B（baked snippet）：构建镜像时 bake LLM，GitLab 不配 OCR_LLM_* → 见 gitlab-ci.ocr.snippet.baked.yml
+#
+# Job 内映射（仅 GitLab 变量名与 OCR 原生 env 不一致时需写）：
+#   OCR_LLM_TOKEN ← OCR_LLM_AUTH_TOKEN
+#   OCR_USE_ANTHROPIC=false（GitLab 无法配置长度<8 的变量）
+
+stages:
+  - review
+
+code-review:
+  stage: review
+  image: $OCR_CI_IMAGE
+  interruptible: true
+  resource_group: mr-review-$CI_MERGE_REQUEST_IID
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: true
+  variables:
+    OCR_CI_IMAGE: "ocr-ci:local"
+    GIT_DEPTH: "0"
+    # 以下 env 覆盖镜像内 config.json（若未在 GitLab 配置则 ocr 使用镜像 config）
+    OCR_LLM_TOKEN: $OCR_LLM_AUTH_TOKEN
+    OCR_USE_ANTHROPIC: "false"
+    OCR_POST_SCRIPT: "/usr/local/lib/ocr-ci/post_ocr_to_gitlab.py"
+  script:
+    - ocr version || true
+    - |
+      echo "Reviewing MR: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME} against ${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
+      ocr review \
+        --from "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" \
+        --to "${CI_COMMIT_SHA}" \
+        --format json \
+        --audience agent \
+        --concurrency 4 \
+        > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
+      echo "OCR review completed."
+      cat /tmp/ocr-result.json
+    - python3 "${OCR_POST_SCRIPT}"
