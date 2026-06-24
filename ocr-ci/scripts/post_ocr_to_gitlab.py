@@ -31,6 +31,16 @@ if str(_SCRIPT_DIR) not in sys.path:
 from ocr_ci_config import resolve_gitlab_api_token
 
 
+def failure_note_body(parse_error: str, stderr_content: str) -> str:
+    """Build MR note when ocr-result.json is missing or invalid."""
+    if stderr_content:
+        return f"⚠️ **OpenCodeReview** encountered an error:\n```\n{stderr_content}\n```"
+    return (
+        "⚠️ **OpenCodeReview** failed: could not read review output "
+        f"({parse_error}). Check the `ocr review` step in the job log."
+    )
+
+
 def main() -> None:
     # --- GitLab CI context (injected by Runner) ---
     gitlab_url = os.environ.get("CI_SERVER_URL", "https://gitlab.com")
@@ -219,9 +229,8 @@ def main() -> None:
                 stderr_content = f.read().strip()
         except FileNotFoundError:
             pass
-        if stderr_content:
-            post_note(f"⚠️ **OpenCodeReview** encountered an error:\n```\n{stderr_content}\n```")
-        # exit 0: job stays green (allow_failure); OCR failure surfaced via note when stderr exists
+        post_note(failure_note_body(str(e), stderr_content))
+        # exit 0: allow_failure job stays green; failure visible on MR
         sys.exit(0)
 
     comments = result.get("comments", [])

@@ -7,12 +7,14 @@
 # Usage:
 #   .\scripts\build_image.ps1
 #   .\scripts\build_image.ps1 -UserConfig C:\Users\you\.opencodereview\config.json
+#   .\scripts\build_image.ps1 -SkipSecretCheck   # defaults-only trial (not for production)
 
 param(
     [string]$Tag = "ocr-ci:local",
     [string]$UserConfig = "",
     [string]$EnvFile = "",
-    [switch]$NoCache
+    [switch]$NoCache,
+    [switch]$SkipSecretCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,6 +41,9 @@ if ($UserConfig) {
 if ($EnvFile) {
     Write-Host "Also merging env file: $EnvFile"
     $bakeArgs += @("--env-file", (Resolve-Path $EnvFile))
+}
+if (-not $SkipSecretCheck) {
+    $bakeArgs += @("--require-secrets")
 }
 
 Write-Host "Baking config.json ..."

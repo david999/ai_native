@@ -132,6 +132,26 @@ def build_config(
     return cfg
 
 
+def validate_baked_config(cfg: dict[str, Any]) -> list[str]:
+    """Return human-readable missing/invalid fields for production baked images."""
+    missing: list[str] = []
+    llm = cfg.get("llm")
+    if not isinstance(llm, dict):
+        missing.append("llm")
+        return missing
+    if not llm.get("url"):
+        missing.append("llm.url")
+    elif not str(llm["url"]).rstrip("/").endswith("/chat/completions"):
+        missing.append("llm.url (must end with /chat/completions)")
+    if not llm.get("auth_token"):
+        missing.append("llm.auth_token")
+    if not llm.get("model"):
+        missing.append("llm.model")
+    if not gitlab_api_token_from_config(cfg):
+        missing.append("gitlab.api_token")
+    return missing
+
+
 def main() -> None:
     # Recommended: --from-user-config → ~/.opencodereview/config.json
     parser = argparse.ArgumentParser(description="Bake OCR config.json for ocr-ci image")
@@ -162,6 +182,11 @@ def main() -> None:
         action="store_true",
         help="Also read OCR_LLM_* / LLM_* from current shell environment",
     )
+    parser.add_argument(
+        "--require-secrets",
+        action="store_true",
+        help="Exit 1 if llm.url/auth_token/model or gitlab.api_token missing (used by build_image.ps1)",
+    )
     args = parser.parse_args()
 
     config_file = args.config
@@ -176,6 +201,11 @@ def main() -> None:
         config_file=config_file,
         include_process_env=args.include_process_env,
     )
+    if args.require_secrets:
+        missing = validate_baked_config(cfg)
+        if missing:
+            print("Baked config validation failed:", ", ".join(missing), file=sys.stderr)
+            sys.exit(1)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)

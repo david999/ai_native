@@ -176,8 +176,6 @@ code-review:
 
       echo "OCR review completed."
 
-      cat /tmp/ocr-result.json
-
 
 
     # Post review comments to MR

@@ -38,5 +38,4 @@ code-review:
         --concurrency 4 \
         > /tmp/ocr-result.json 2>/tmp/ocr-stderr.log || true
       echo "OCR review completed."
-      cat /tmp/ocr-result.json
     - python3 "${OCR_POST_SCRIPT}"
