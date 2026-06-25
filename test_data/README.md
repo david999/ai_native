@@ -6,22 +6,27 @@
 
 ```
 test_data/
-├── spring-cloud-demo/          # 业务仓（自有 .git，clone 自本地 GitLab）
+├── datacalc-web/               # OCR Gateway 联调样例（Java，含 .gitlab-ci.yml）
+├── spring-cloud-demo/          # AICR Reviewer 等业务仓（自有 .git）
 ├── fixtures/scenarios/         # 固定测试场景（纳入 monorepo）
 │   ├── manifest.yaml
-│   ├── S05_feign_no_timeout/
-│   ├── S06_incremental/        # 增量评审（incremental_only）
 │   └── ...
-└── scripts/                    # 场景应用、MR、校验
-    ├── apply_scenario.py       # --incremental / --include-incremental
-    ├── validate_scenario.py    # 分数±5、关键词、文件命中
-    ├── assert_gitlab_publish.py
-    ├── bootstrap_demo.ps1
-    ├── ensure_gitlab.ps1
+└── scripts/                    # 场景应用、MR、校验、L3b 跑前检查
+    ├── verify_l3b_runner.ps1
     └── ...
 ```
 
-`spring-cloud-demo` 的 **remote 应指向本地 GitLab**（`http://localhost:8000/...`）。根 `.gitignore` 忽略 `test_data/**/.git/`。
+## OCR Gateway（ocr-ci2）联调
+
+| 项 | 说明 |
+|----|------|
+| 样例仓 | [`datacalc-web/`](datacalc-web/) — 对应 GitLab `java_group/datacalc-web` |
+| Gateway | `ocr-ci2/deploy/local/run.ps1`，`:8010` |
+| CI 片段 | 与 [`ocr-ci2/deploy/prod/ci/snippet.native-host.yml`](../ocr-ci2/deploy/prod/ci/snippet.native-host.yml) 对齐 |
+| 文档 | [ocr-ci2/docs/测试与验收.md](../ocr-ci2/docs/测试与验收.md) |
+| 跑前检查 | `test_data/scripts/verify_l3b_runner.ps1 -ProjectPath java_group/datacalc-web` |
+
+与 **AICR Reviewer（:8001）**、`spring-cloud-demo` 验收相互独立；勿混淆端口与 CI 变量。
 
 ## 获取 Demo
 
@@ -30,20 +35,13 @@ cd test_data
 git clone http://localhost:8000/java_group/spring-cloud-demo.git
 ```
 
-需先启动 `evn/gitlab`（`docker compose up -d`）。
+需先启动本地 GitLab（见 [`evn/gitlab/`](../evn/gitlab/)）。
 
 ## 固定测试场景
 
-场景定义在 `fixtures/scenarios/`；**每次验收应用相同 patch**，不随机生成代码。详见 [docs/测试与验收.md](../docs/测试与验收.md)。
+场景定义在 `fixtures/scenarios/`。详见 [docs/测试与验收.md](../docs/测试与验收.md)（AICR L1–L3）。
 
-```powershell
-cd E:\ai_native\aicr-reviewer
-.\.venv\Scripts\python.exe ..\test_data\scripts\apply_scenario.py --scenario S02_npe_optional
-```
-
-基线分支：`aicr-test-base`（由 `bootstrap_demo.ps1` 创建）。
-
-## CI 集成
+## CI 集成（AICR Reviewer）
 
 业务仓库 `.gitlab-ci.yml` 引用：
 
@@ -52,11 +50,12 @@ cd E:\ai_native\aicr-reviewer
 
 | CI 变量 | 值 |
 |---------|-----|
-| `AICR_REVIEW_URL` | `http://host.docker.internal:8001`（Runner 容器 → 宿主机 AICR） |
+| `AICR_REVIEW_URL` | `http://host.docker.internal:8001` |
 | `AICR_REVIEW_SECRET` | 与 `evn/.env` 中 `REVIEW_API_SECRET` 一致 |
 
 ## 全链路验收
 
-- 分层手册：[docs/测试与验收.md](../docs/测试与验收.md)
-- L3b 跑前：`test_data/scripts/verify_l3b_runner.ps1`
-- L3b 跑后：`test_data/scripts/collect_l3b_report.py --project-id <id> --mr-iid <iid> [--scenario S02_npe_optional]`
+- AICR 分层：[docs/测试与验收.md](../docs/测试与验收.md)
+- OCR Gateway L3b 跑前：`test_data/scripts/verify_l3b_runner.ps1`
+- OCR Gateway L3b 跑后：`test_data/scripts/collect_l3b_report.py --project-id <id> --mr-iid <iid>`
+

@@ -11,6 +11,6 @@
     }
   },
   "gitlab": {
-    "api_token": "glpat-YOUR_AICR_BOT_TOKEN"
+    "api_token": "glpat-YOUR_GITLAB_TOKEN"
   }
 }

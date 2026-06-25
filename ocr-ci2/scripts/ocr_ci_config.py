@@ -27,7 +27,7 @@ def config_search_paths() -> list[Path]:
     """解析 gitlab.api_token 的搜索路径（先命中者优先）。
 
     OCR_CONFIG_PATH：显式覆盖（测试/本地调试）
-    /root/.opencodereview/config.json：ocr-ci Docker 镜像内 bake 路径
+    /root/.opencodereview/config.json：Docker 镜像内 bake 路径
     user_config_path()：开发机 CLI 配置
     """
     paths: list[Path] = []
