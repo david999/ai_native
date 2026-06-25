@@ -115,6 +115,7 @@ def assert_ocr_session(gateway_job_id: str, scenario_id: str) -> dict[str, Any]:
         "errors": errors,
         "warnings": warnings,
         "viewer_hint": trace.get("viewer_hint"),
+        "severity_dashboard_hint": trace.get("severity_dashboard_hint"),
         "session_id": trace.get("session_id"),
         "jsonl_path": trace.get("jsonl_path"),
         "rule_injected": trace.get("rule_injected"),

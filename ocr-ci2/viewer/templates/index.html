@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Severity Dashboard - OCR</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb">
+    <a href="/">OCR Severity Dashboard</a>
+    <span class="muted">:5484</span>
+</nav>
+<main>
+    <h1>Repositories</h1>
+    <p class="hint">
+        扫描 <code>{{ sessions_root }}</code>；
+        官方详情见 <a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
+    </p>
+
+    <div class="filters">
+        {% if only_high %}
+        <a class="btn" href="/">显示全部</a>
+        {% else %}
+        <a class="btn btn-warn" href="/?highlight=high">仅含 HIGH</a>
+        {% endif %}
+    </div>
+
+    {% if repos %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Repository</th>
+                <th>Sessions</th>
+                <th class="sev-high">HIGH</th>
+                <th class="sev-medium">MEDIUM</th>
+                <th class="sev-low">LOW</th>
+                <th>Last Modified</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for repo in repos %}
+            <tr{% if repo.has_high %} class="row-high"{% endif %}>
+                <td>
+                    <a href="{{ repo.repo_url }}">{{ repo.display_name }}</a>
+                    <div class="slug muted">{{ repo.encoded_path }}</div>
+                </td>
+                <td>{{ repo.session_count }}</td>
+                <td class="sev-high">{{ repo.high }}</td>
+                <td class="sev-medium">{{ repo.medium }}</td>
+                <td class="sev-low">{{ repo.low }}</td>
+                <td>{{ repo.last_modified | format_time }}</td>
+                <td>
+                    {% if repo.has_high %}
+                    <span class="badge badge-high">HIGH 告警</span>
+                    {% endif %}
+                    <a href="{{ repo.repo_url }}">Sessions</a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No session data found. Run <code>ocr review</code> first.</p>
+    {% endif %}
+</main>
+</body>
+</html>

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import sys
 import time
 import urllib.error
@@ -23,6 +24,38 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 from ocr_ci_config import resolve_gitlab_api_token
+
+SEVERITY_COLOR_RE = re.compile(r"\[(HIGH|MEDIUM|LOW)\]")
+# Plan B: GitLab CE 常剥离 inline style；用 emoji + <strong>（Markdown 粗体）
+SEVERITY_MARKERS = {
+    "HIGH": "🔴",
+    "MEDIUM": "🟡",
+    "LOW": "⚪",
+}
+_ALREADY_MARKED_RE = re.compile(r"[🔴🟡⚪]\s*\[(HIGH|MEDIUM|LOW)\]")
+
+
+def severity_color_enabled() -> bool:
+    """OCR_SEVERITY_COLOR=1（默认）时为 [HIGH]/[MEDIUM]/[LOW] 加 emoji + 粗体。"""
+    val = os.environ.get("OCR_SEVERITY_COLOR", "1").strip().lower()
+    return val not in ("0", "false", "no", "off")
+
+
+def colorize_severity(text: str) -> str:
+    if not text or not severity_color_enabled():
+        return text
+
+    def _replacer(match: re.Match[str]) -> str:
+        level = match.group(1)
+        start = match.start()
+        window = text[max(0, start - 12) : start]
+        if _ALREADY_MARKED_RE.search(window) or "<strong>" in window:
+            return match.group(0)
+        emoji = SEVERITY_MARKERS.get(level, "")
+        prefix = f"{emoji} [{level}]" if emoji else f"[{level}]"
+        return f"<strong>{prefix}</strong>"
+
+    return SEVERITY_COLOR_RE.sub(_replacer, text)
 
 
 def ocr_result_path() -> str:
@@ -293,7 +326,7 @@ def post_review_from_files(
 
 
 def _format_comment(comment: dict) -> str:
-    body = comment.get("content", "")
+    body = colorize_severity(comment.get("content", ""))
     existing = comment.get("existing_code", "")
     suggestion = comment.get("suggestion_code", "")
     if suggestion and existing:
@@ -306,7 +339,7 @@ def _format_comment_fallback(comment: dict) -> str:
     path = comment.get("path", "unknown")
     start_line = comment.get("start_line", 0)
     end_line = comment.get("end_line", 0)
-    content = comment.get("content", "")
+    content = colorize_severity(comment.get("content", ""))
     md = f"### 📄 `{path}`"
     if start_line and end_line:
         md += f" (L{start_line}-L{end_line})"

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ session.session_id }} - Severity Summary</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb">
+    <a href="/">OCR Severity Dashboard</a>
+    <span>/</span>
+    <a href="{{ repo_url }}">{{ display_name }}</a>
+    <span>/</span>
+    <span>{{ session.session_id }}</span>
+</nav>
+<main>
+    <h1>Session {{ session.session_id }}</h1>
+    <p class="hint">
+        <a href="{{ official_url }}" target="_blank" rel="noopener">官方详情 → {{ official_url }}</a>
+    </p>
+
+    <section class="summary-cards">
+        <div class="card sev-high">
+            <div class="card-label">HIGH</div>
+            <div class="card-value">{{ session.severity.high }}</div>
+        </div>
+        <div class="card sev-medium">
+            <div class="card-label">MEDIUM</div>
+            <div class="card-value">{{ session.severity.medium }}</div>
+        </div>
+        <div class="card sev-low">
+            <div class="card-label">LOW</div>
+            <div class="card-value">{{ session.severity.low }}</div>
+        </div>
+    </section>
+
+    {% if session.cwd %}
+    <p><strong>CWD:</strong> <code>{{ session.cwd }}</code></p>
+    {% endif %}
+    {% if session.git_branch %}
+    <p><strong>Branch:</strong> {{ session.git_branch }}</p>
+    {% endif %}
+
+    <h2>HIGH 评论片段</h2>
+    {% if high_comments %}
+    <ul class="comment-list">
+        {% for c in high_comments %}
+        <li class="comment-high">
+            {% if c.file_path %}
+            <div class="comment-meta"><code>{{ c.file_path }}</code>{% if c.line %} L{{ c.line }}{% endif %}</div>
+            {% endif %}
+            <pre class="comment-snippet">{{ c.snippet }}</pre>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">本 session 无带 [HIGH] 前缀的 code_comment。</p>
+    {% endif %}
+</main>
+</body>
+</html>

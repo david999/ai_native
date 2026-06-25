@@ -13,10 +13,14 @@ import pytest
 
 from gitlab_mr import (
     GitLabMrClient,
+    _format_comment,
+    _format_comment_fallback,
+    colorize_severity,
     failure_note_body,
     ocr_result_path,
     ocr_stderr_path,
     post_review_from_files,
+    severity_color_enabled,
 )
 
 
@@ -74,3 +78,41 @@ def test_post_review_lenient_when_api_fails(tmp_path, monkeypatch):
     client.post_note.return_value = {"success": False}
     code = post_review_from_files(client, result_path=str(result_file))
     assert code == 0
+
+
+def test_colorize_severity_all_levels():
+    text = "[HIGH] bug [MEDIUM] style [LOW] nit"
+    out = colorize_severity(text)
+    assert "<strong>🔴 [HIGH]</strong>" in out
+    assert "<strong>🟡 [MEDIUM]</strong>" in out
+    assert "<strong>⚪ [LOW]</strong>" in out
+
+
+def test_colorize_severity_disabled(monkeypatch):
+    monkeypatch.setenv("OCR_SEVERITY_COLOR", "0")
+    assert not severity_color_enabled()
+    text = "[HIGH] unchanged"
+    assert colorize_severity(text) == text
+
+
+def test_format_comment_applies_color(monkeypatch):
+    monkeypatch.setenv("OCR_SEVERITY_COLOR", "1")
+    body = _format_comment({"content": "[HIGH] issue"})
+    assert "<strong>🔴 [HIGH]</strong>" in body
+    assert "issue" in body
+
+
+def test_format_comment_fallback_applies_color(monkeypatch):
+    monkeypatch.setenv("OCR_SEVERITY_COLOR", "1")
+    md = _format_comment_fallback(
+        {"path": "a.py", "start_line": 1, "end_line": 2, "content": "[MEDIUM] warn"}
+    )
+    assert "<strong>🟡 [MEDIUM]</strong>" in md
+    assert "warn" in md
+
+
+def test_colorize_severity_idempotent():
+    once = colorize_severity("[HIGH] issue")
+    twice = colorize_severity(once)
+    assert once == twice
+    assert once.count("🔴") == 1

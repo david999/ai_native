@@ -15,6 +15,9 @@ AGENTS_NAME_RE = re.compile(r"AGENTS\.md", re.I)
 AI_PATH_RE = re.compile(r"\.ai[/\\]", re.I)
 
 VIEWER_BASE = os.environ.get("OCR_VIEWER_URL", "http://localhost:5483").rstrip("/")
+SEVERITY_DASHBOARD_BASE = os.environ.get(
+    "SEVERITY_DASHBOARD_URL", "http://localhost:5484"
+).rstrip("/")
 
 
 def sessions_root() -> Path:
@@ -170,8 +173,10 @@ def parse_session_jsonl(path: Path) -> dict[str, Any]:
 
     rule_injected = rule_r1_injected or rule_r2_injected
     viewer_hint = ""
+    severity_dashboard_hint = ""
     if session_id and repo_slug:
         viewer_hint = f"{VIEWER_BASE}/r/{repo_slug}/{session_id}"
+        severity_dashboard_hint = f"{SEVERITY_DASHBOARD_BASE}/r/{repo_slug}/{session_id}"
 
     return {
         "jsonl_path": str(path),
@@ -187,6 +192,7 @@ def parse_session_jsonl(path: Path) -> dict[str, Any]:
         "files_read": sorted(set(files_read)),
         "tool_names": sorted(set(tool_names)),
         "viewer_hint": viewer_hint,
+        "severity_dashboard_hint": severity_dashboard_hint,
     }
 
 

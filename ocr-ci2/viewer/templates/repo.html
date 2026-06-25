@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ display_name }} - Severity Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb">
+    <a href="/">OCR Severity Dashboard</a>
+    <span>/</span>
+    <span>{{ display_name }}</span>
+</nav>
+<main>
+    <h1>{{ display_name }}</h1>
+    <p class="hint slug muted">{{ encoded_repo }}</p>
+
+    <div class="filters">
+        {% if only_high %}
+        <a class="btn" href="{{ repo_url }}">显示全部</a>
+        {% else %}
+        <a class="btn btn-warn" href="{{ repo_url }}?highlight=high">仅含 HIGH</a>
+        {% endif %}
+    </div>
+
+    {% if sessions %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Branch</th>
+                <th class="sev-high">HIGH</th>
+                <th class="sev-medium">MEDIUM</th>
+                <th class="sev-low">LOW</th>
+                <th>Last Modified</th>
+                <th>链接</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for s in sessions %}
+            <tr{% if s.has_high %} class="row-high"{% endif %}>
+                <td><code>{{ s.session_id }}</code></td>
+                <td>{{ s.git_branch or "—" }}</td>
+                <td class="sev-high">{{ s.high }}</td>
+                <td class="sev-medium">{{ s.medium }}</td>
+                <td class="sev-low">{{ s.low }}</td>
+                <td>{{ s.last_modified | format_time }}</td>
+                <td class="links">
+                    <a href="{{ s.official_url }}" target="_blank" rel="noopener">官方详情</a>
+                    <a href="{{ s.session_url }}">Severity 摘要</a>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% elif has_any_sessions %}
+    <p class="muted">无含 HIGH 的 session（切换「显示全部」查看）。</p>
+    {% else %}
+    <p>无匹配 session。</p>
+    {% endif %}
+</main>
+</body>
+</html>

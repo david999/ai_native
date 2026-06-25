@@ -56,9 +56,19 @@ curl http://localhost:8010/health
 | 文件 | 作用 |
 |------|------|
 | [post_ocr_to_gitlab.py](scripts/post_ocr_to_gitlab.py) | OCR JSON → GitLab MR 评论 |
-| [gitlab_mr.py](scripts/gitlab_mr.py) | GitLab MR API 工具 |
+| [gitlab_mr.py](scripts/gitlab_mr.py) | GitLab MR API 工具（含 `[HIGH]`/`[MEDIUM]`/`[LOW]` 着色） |
+| [session_telemetry.py](scripts/session_telemetry.py) | 扫描 JSONL severity 统计 |
 | [ocr_ci_config.py](scripts/ocr_ci_config.py) | 读取 `config.json` / 环境变量 |
 | [acceptance/bake_ocr_config.py](scripts/acceptance/bake_ocr_config.py) | Docker 构建 bake 配置 |
+
+### `viewer/` — Severity Dashboard（:5484）
+
+| 文件 | 作用 |
+|------|------|
+| [app.py](viewer/app.py) | FastAPI 首页 / repo / session 摘要 |
+| [deploy/local/run_viewer.ps1](deploy/local/run_viewer.ps1) | 本地启动脚本 |
+
+与官方 `ocr viewer`（:5483）读同一 JSONL；**不修改** open-code-review 源码。
 
 ### `config/` — 配置模板
 

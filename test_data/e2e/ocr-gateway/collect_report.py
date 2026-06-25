@@ -50,6 +50,9 @@ def write_report_md(data: dict, out_dir: Path) -> str:
         lines.append(f"  - WARN (session): {w}")
     if session_assert.get("viewer_hint"):
         lines.extend(["", f"- OCR Viewer: {session_assert['viewer_hint']}"])
+    severity_hint = session_assert.get("severity_dashboard_hint")
+    if severity_hint:
+        lines.append(f"- Severity Dashboard: {severity_hint}")
     if session_assert.get("jsonl_path"):
         lines.append(f"- Session JSONL: `{session_assert['jsonl_path']}`")
     lines.extend(["", "## 产物", "", f"- `{out_dir / 'scenario.json'}`", f"- `{out_dir / 'job_log.txt'}`"])
