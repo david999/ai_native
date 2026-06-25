@@ -35,14 +35,23 @@ def write_report_md(data: dict, out_dir: Path) -> str:
         "",
     ]
     assert_result = data.get("assert") or {}
-    if assert_result.get("ok"):
+    session_assert = data.get("session_assert") or {}
+    if assert_result.get("ok") and (session_assert.get("ok") or session_assert.get("skipped")):
         lines.append("- 结果: **通过**")
     else:
         lines.append("- 结果: **失败**")
         for err in assert_result.get("errors") or []:
-            lines.append(f"  - {err}")
+            lines.append(f"  - MR: {err}")
+        for err in session_assert.get("errors") or []:
+            lines.append(f"  - Session: {err}")
     for w in assert_result.get("warnings") or []:
-        lines.append(f"  - WARN: {w}")
+        lines.append(f"  - WARN (MR): {w}")
+    for w in session_assert.get("warnings") or []:
+        lines.append(f"  - WARN (session): {w}")
+    if session_assert.get("viewer_hint"):
+        lines.extend(["", f"- OCR Viewer: {session_assert['viewer_hint']}"])
+    if session_assert.get("jsonl_path"):
+        lines.append(f"- Session JSONL: `{session_assert['jsonl_path']}`")
     lines.extend(["", "## 产物", "", f"- `{out_dir / 'scenario.json'}`", f"- `{out_dir / 'job_log.txt'}`"])
     text = "\n".join(lines) + "\n"
     (out_dir / "ocr_e2e_report.zh.md").write_text(text, encoding="utf-8")
@@ -60,6 +69,7 @@ def collect_report(
     wait_result: dict,
     gateway_result: dict,
     assert_result: dict,
+    session_assert_result: dict | None = None,
     out_dir: Path,
 ) -> dict:
     token = gitlab_token()
@@ -81,6 +91,10 @@ def collect_report(
     (out_dir / "assert.json").write_text(
         json.dumps(assert_result or {}, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    session_assert_result = session_assert_result or {}
+    (out_dir / "session_assert.json").write_text(
+        json.dumps(session_assert_result, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
     data = {
         "scenario_id": scenario_id,
@@ -93,6 +107,7 @@ def collect_report(
         "ocr_note_count": (assert_result or {}).get("ocr_note_count"),
         "inline_count": (assert_result or {}).get("inline_count"),
         "assert": assert_result,
+        "session_assert": session_assert_result,
         "spec_title": get_scenario_spec(scenario_id).get("title"),
     }
     write_report_md(data, out_dir)
@@ -111,6 +126,7 @@ def main() -> int:
     parser.add_argument("--wait-json", required=True)
     parser.add_argument("--gateway-json", default="")
     parser.add_argument("--assert-json", required=True)
+    parser.add_argument("--session-assert-json", default="")
     parser.add_argument("--output-dir", default="")
     args = parser.parse_args()
 
@@ -132,6 +148,7 @@ def main() -> int:
         wait_result=_load(args.wait_json),
         gateway_result=_load(args.gateway_json),
         assert_result=_load(args.assert_json),
+        session_assert_result=_load(args.session_assert_json),
         out_dir=out_dir,
     )
     print(f"Report: {out_dir / 'ocr_e2e_report.zh.md'}")

@@ -1,0 +1,9 @@
+id: D06_rule_ai_standards
+title: rule.json R1 - AGENTS.md and .ai standards
+branch: ocr-test/D06_rule_ai_standards
+commit_message: "test(D06): Controller SQL concat violates .ai standards"
+files:
+  - dest: src/main/java/com/aulton/datacalc/controller/ChangeBatteryListController.java
+    source: files/ChangeBatteryListController.java
+  - dest: .opencodereview/rule.json
+    source: files/.opencodereview/rule.json

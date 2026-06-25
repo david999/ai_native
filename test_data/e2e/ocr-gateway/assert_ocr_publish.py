@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,17 +91,28 @@ def collect_ocr_content(
             elif note_is_ocr(body):
                 inline_bodies.append(body)
 
-    all_text = "\n".join(
+    all_text_raw = "\n".join(
         [(n.get("body") or "") for n in ocr_notes] + inline_bodies
-    ).lower()
+    )
+    all_text = all_text_raw.lower()
     return {
         "ocr_note_count": len(ocr_notes),
         "inline_count": inline_count,
         "all_text": all_text,
+        "all_text_raw": all_text_raw,
         "ocr_notes": ocr_notes,
         "sample_bodies": [(n.get("body") or "")[:240] for n in ocr_notes[:3]],
         "since": since.isoformat() if since else None,
     }
+
+
+def _publish_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    publish = spec.get("publish")
+    if isinstance(publish, dict):
+        merged = dict(spec)
+        merged.update(publish)
+        return merged
+    return spec
 
 
 def assert_ocr_publish(
@@ -115,7 +127,7 @@ def assert_ocr_publish(
     if not token:
         return {"ok": False, "errors": ["missing GitLab token"]}
 
-    spec = get_scenario_spec(scenario_id)
+    spec = _publish_spec(get_scenario_spec(scenario_id))
     notes = get_mr_notes(token, project_id, mr_iid)
     discussions = get_mr_discussions(token, project_id, mr_iid)
     collected = collect_ocr_content(notes, discussions, since=since)
@@ -147,6 +159,34 @@ def assert_ocr_publish(
         else:
             errors.append(msg)
 
+    any_keywords = [str(k).lower() for k in (spec.get("must_find_any_keywords") or [])]
+    if any_keywords:
+        found_any = any(kw and kw in collected["all_text"] for kw in any_keywords)
+        if not found_any:
+            msg = f"none of keywords found in MR OCR content: {any_keywords}"
+            if spec.get("keyword_warnings_only"):
+                warnings.append(msg)
+            else:
+                errors.append(msg)
+
+    regex_patterns = [str(p) for p in (spec.get("must_match_regex") or []) if p]
+    regex_warnings_only = bool(spec.get("regex_warnings_only"))
+    severity_matches = 0
+    raw_text = collected.get("all_text_raw") or ""
+    for pattern in regex_patterns:
+        try:
+            matches = re.findall(pattern, raw_text, flags=re.MULTILINE)
+        except re.error as exc:
+            errors.append(f"invalid must_match_regex {pattern!r}: {exc}")
+            continue
+        severity_matches += len(matches)
+        if not matches:
+            msg = f"MR OCR content did not match regex: {pattern}"
+            if regex_warnings_only:
+                warnings.append(msg)
+            else:
+                errors.append(msg)
+
     if spec.get("relax_comment_count") and compare_inline_count is not None:
         if collected["inline_count"] > compare_inline_count + 2:
             warnings.append(
@@ -165,6 +205,7 @@ def assert_ocr_publish(
         "ocr_note_count": collected["ocr_note_count"],
         "inline_count": collected["inline_count"],
         "sample_bodies": collected["sample_bodies"],
+        "severity_matches": severity_matches,
         "assert_since": collected.get("since"),
         "gitlab_url": gitlab_url(),
         "project_id": project_id,

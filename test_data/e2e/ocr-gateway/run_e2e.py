@@ -17,6 +17,7 @@ if str(E2E_ROOT) not in sys.path:
     sys.path.insert(0, str(E2E_ROOT))
 
 from assert_ocr_publish import assert_ocr_publish
+from assert_ocr_session import assert_ocr_session
 from collect_report import collect_report
 from lib.gitlab_api import gitlab_token, load_dotenv
 from lib.scenario_manifest import get_scenario_spec, load_scenario_ids
@@ -115,6 +116,7 @@ def run_scenario(scenario_id: str, *, skip_preflight: bool) -> int:
         mr_json = tmp_path / "mr.json"
         wait_json = tmp_path / "wait.json"
         gateway_json = tmp_path / "gateway.json"
+        session_assert_json = tmp_path / "session_assert.json"
         assert_json = tmp_path / "assert.json"
 
         code = run_py(
@@ -208,6 +210,11 @@ def run_scenario(scenario_id: str, *, skip_preflight: bool) -> int:
         if compare_sid and compare_sid in _compare_inline:
             compare_inline = _compare_inline[compare_sid]
 
+        session_assert_result = assert_ocr_session(gateway_job_id, scenario_id)
+        session_assert_json.write_text(
+            json.dumps(session_assert_result, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
         assert_result = assert_ocr_publish(
             project_id,
             int(mr_result["mr_iid"]),
@@ -216,6 +223,11 @@ def run_scenario(scenario_id: str, *, skip_preflight: bool) -> int:
             since=assert_since,
         )
         assert_json.write_text(json.dumps(assert_result, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        if session_assert_result.get("viewer_hint"):
+            print(f"OCR Viewer: {session_assert_result['viewer_hint']}")
+        for w in session_assert_result.get("warnings") or []:
+            print(f"WARN (session): {w}")
 
         if scenario_id == "D02_bug_npe_optional":
             _compare_inline[scenario_id] = assert_result.get("inline_count", 0)
@@ -232,8 +244,14 @@ def run_scenario(scenario_id: str, *, skip_preflight: bool) -> int:
             wait_result=wait_payload,
             gateway_result=gateway_result,
             assert_result=assert_result,
+            session_assert_result=session_assert_result,
             out_dir=out_dir,
         )
+
+        if not session_assert_result.get("ok") and not session_assert_result.get("skipped"):
+            for err in session_assert_result.get("errors") or []:
+                print(f"FAIL (session): {err}", file=sys.stderr)
+            return 1
 
         if not assert_result.get("ok"):
             for err in assert_result.get("errors") or []:

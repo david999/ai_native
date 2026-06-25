@@ -38,3 +38,36 @@ scenarios:
     must_find_keywords: []
     relax_comment_count: true
     compare_scenario: D02_bug_npe_optional
+
+  - id: D05_rule_severity_prefix
+    title: rule.json R2 - 严重级别前缀
+    branch: ocr-test/D05_rule_severity_prefix
+    target_branch: master
+    min_ocr_notes: 1
+    min_inline_comments: 0
+    session:
+      must_rule_r2_injected: true
+      must_severity_in_trace: 1
+      severity_warnings_only: true
+    publish:
+      must_match_regex:
+        - '\[(HIGH|MEDIUM|LOW)\]'
+      regex_warnings_only: true
+
+  - id: D06_rule_ai_standards
+    title: rule.json R1 - AGENTS.md 与 .ai 规范
+    branch: ocr-test/D06_rule_ai_standards
+    target_branch: master
+    min_ocr_notes: 1
+    min_inline_comments: 0
+    session:
+      must_rule_injected_or_read_agents: true
+      warn_if_no_ai_read: true
+    publish:
+      must_find_any_keywords:
+        - controller
+        - service
+        - 硬编码
+        - 拼接
+        - sql
+      keyword_warnings_only: true
