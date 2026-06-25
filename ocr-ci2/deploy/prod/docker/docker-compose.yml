@@ -1,0 +1,34 @@
+# OCR Gateway production stack (join GitLab docker network).
+#
+# Prerequisites:
+#   deploy/prod/docker/build_image.ps1
+#   GitLab network gitlab_default must exist
+
+services:
+  ocr-gateway:
+    image: ocr-gateway:local
+    build:
+      context: ../../..
+      dockerfile: deploy/prod/docker/Dockerfile
+    container_name: ocr-gateway
+    ports:
+      - "8010:8010"
+    networks:
+      - gitlab_default
+    volumes:
+      - ocr-gateway-work:/var/ocr-gateway/work
+    environment:
+      OCR_GATEWAY_GITLAB_URL: http://gitlab:8000
+      OCR_GATEWAY_GITLAB_PUBLIC_URL: http://localhost:8000
+      OCR_GATEWAY_GITLAB_API_URL: http://gitlab:8000
+      OCR_GATEWAY_SECRET: local-dev-secret
+      OCR_GATEWAY_MAX_CONCURRENT: "2"
+      OCR_GATEWAY_WORK_ROOT: /var/ocr-gateway/work
+    restart: unless-stopped
+
+volumes:
+  ocr-gateway-work:
+
+networks:
+  gitlab_default:
+    external: true

@@ -15,18 +15,17 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-_SCRIPT_DIR = Path(__file__).resolve().parent
-if str(_SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPT_DIR))
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 from ocr_ci_config import resolve_gitlab_api_token, user_config_path
 
-_OCR_CI_ROOT = Path(__file__).resolve().parent.parent
+_OCR_CI_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_REPO = _OCR_CI_ROOT.parent / "test_data" / "spring-cloud-demo"
 _DEFAULT_RESULT = _OCR_CI_ROOT / ".build" / "ocr-result.json"
 
 
 def _ocr_executable() -> str:
-    """Resolve ocr on Windows (ocr.cmd) and Unix."""
     for name in ("ocr.cmd", "ocr.exe", "ocr"):
         path = shutil.which(name)
         if path:
@@ -66,10 +65,8 @@ def main() -> None:
     args = parser.parse_args()
 
     ok = True
-
     ocr_bin = _ocr_executable()
 
-    # 1) OCR CLI
     try:
         ver = subprocess.run([ocr_bin, "version"], capture_output=True, text=True, check=True)
         first = (ver.stdout or "").strip().splitlines()[0]
@@ -78,7 +75,6 @@ def main() -> None:
         print(f"ocr_cli: FAIL ({exc})")
         ok = False
 
-    # 2) config.json
     cfg_path = user_config_path()
     token = resolve_gitlab_api_token()
     print(f"config_path: {cfg_path}")
@@ -86,7 +82,6 @@ def main() -> None:
     if not token:
         ok = False
 
-    # 3) GitLab user
     if token:
         try:
             user = _gitlab_get(f"{args.gitlab_url.rstrip('/')}/api/v4/user", token)
@@ -95,7 +90,6 @@ def main() -> None:
             print(f"gitlab_user: FAIL ({exc})")
             ok = False
 
-    # 4) ocr review (local)
     args.result_out.parent.mkdir(parents=True, exist_ok=True)
     review_cmd = [
         ocr_bin,
@@ -133,7 +127,6 @@ def main() -> None:
         print(f"ocr_review: FAIL ({exc})")
         ok = False
 
-    # 5) MR API (post prerequisites)
     project_enc = args.project.replace("/", "%2F")
     if token:
         try:

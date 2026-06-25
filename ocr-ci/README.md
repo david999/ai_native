@@ -104,7 +104,7 @@ GitLab:   Job env GITLAB_API_TOKEN  >  config.json gitlab.api_token  >  CI_JOB_T
 
 | [`config/ocr-ci.config.json.example`](config/ocr-ci.config.json.example) | 文档 | 用户 `~/.opencodereview/config.json` 字段示例 |
 
-| [`scripts/bake_ocr_config.py`](scripts/bake_ocr_config.py) | 工具 | 合并 defaults + 用户 config（可选 legacy env）→ `.build/config.json` |
+| [`scripts/acceptance/bake_ocr_config.py`](scripts/acceptance/bake_ocr_config.py) | 构建辅助 | 从 `~/.opencodereview/config.json` 生成 `.build/config.json`（非自动化测试） |
 
 | [`scripts/build_image.ps1`](scripts/build_image.ps1) | 工具 | 调用 bake + `docker build -t ocr-ci:local` |
 
@@ -112,7 +112,7 @@ GitLab:   Job env GITLAB_API_TOKEN  >  config.json gitlab.api_token  >  CI_JOB_T
 
 | [`scripts/post_ocr_to_gitlab.py`](scripts/post_ocr_to_gitlab.py) | 运行时 | CI Job 读 `/tmp/ocr-result.json`，调 GitLab API 发行内评论 |
 
-| [`scripts/verify_local_ocr.py`](scripts/verify_local_ocr.py) | 工具 | 本机 OCR + config + GitLab 连通性验收（不替代 CI） |
+| [`scripts/acceptance/verify_local_ocr.py`](scripts/acceptance/verify_local_ocr.py) | 验收 | 本机 OCR + config + GitLab 连通性（不替代 CI） |
 | [`tests/`](tests/) | 测试 | `pytest`：config 解析、bake 校验、发帖失败 note 文案 |
 | [`requirements-dev.txt`](requirements-dev.txt) | 开发 | pytest 依赖 |
 
@@ -141,6 +141,8 @@ GitLab:   Job env GITLAB_API_TOKEN  >  config.json gitlab.api_token  >  CI_JOB_T
 
 
 三方案对比见 [docs/OCR-GitLab-Webhook集成指南.md](../docs/OCR-GitLab-Webhook集成指南.md) §6。
+
+**方案 3（OCR 常驻 + 轻 CI）**：见 [`ocr-ci2/`](../ocr-ci2/) 与 [方案评估](../ocr-ci2/docs/方案评估.md)。
 
 ## 开发与测试
 

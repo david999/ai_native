@@ -20,5 +20,6 @@ RUN npm install -g "${OCR_NPM_VERSION}" \
 COPY .build/config.json /root/.opencodereview/config.json
 
 COPY scripts/post_ocr_to_gitlab.py /usr/local/lib/ocr-ci/post_ocr_to_gitlab.py
+COPY scripts/gitlab_mr.py /usr/local/lib/ocr-ci/gitlab_mr.py
 COPY scripts/ocr_ci_config.py /usr/local/lib/ocr-ci/ocr_ci_config.py
 RUN chmod +x /usr/local/lib/ocr-ci/post_ocr_to_gitlab.py

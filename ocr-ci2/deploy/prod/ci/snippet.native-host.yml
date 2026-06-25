@@ -1,0 +1,49 @@
+# OpenCodeReview GitLab CI — Gateway on host (native)
+#
+# 端口：OCR_GATEWAY_URL 使用 :8010（Gateway），不是 :8000（GitLab）
+# 本地前置：deploy/local/run.ps1；GitLab 在 :8000
+#
+# GitLab Variables:
+#   OCR_GATEWAY_SECRET=<与 deploy/local/gateway.env 相同>
+#   OCR_GATEWAY_URL=http://host.docker.internal:8010
+
+stages:
+  - review
+
+code-review:
+  stage: review
+  image: curlimages/curl:8.12.1
+  interruptible: true
+  resource_group: mr-review-$CI_MERGE_REQUEST_IID
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: true
+  variables:
+    GIT_DEPTH: "0"
+    OCR_GATEWAY_URL: "http://host.docker.internal:8010"
+  script:
+    - |
+      set -e
+      payload=$(printf '{"project_id":"%s","project_path":"%s","mr_iid":"%s","target_branch":"%s","commit_sha":"%s"}' \
+        "$CI_PROJECT_ID" "$CI_PROJECT_PATH" "$CI_MERGE_REQUEST_IID" \
+        "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" "$CI_COMMIT_SHA")
+      echo "POST ${OCR_GATEWAY_URL}/v1/review/merge-request"
+      resp=$(curl -sf -X POST "${OCR_GATEWAY_URL}/v1/review/merge-request" \
+        -H "Content-Type: application/json" \
+        -H "X-OCR-Gateway-Token: ${OCR_GATEWAY_SECRET}" \
+        -d "$payload")
+      echo "$resp"
+      job_id=$(echo "$resp" | sed -n 's/.*"job_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+      echo "Gateway job_id=${job_id} (async; MR comments when gateway finishes)"
+      if [ -n "${OCR_GATEWAY_WAIT:-}" ] && [ -n "$job_id" ]; then
+        for i in $(seq 1 120); do
+          st=$(curl -sf -H "X-OCR-Gateway-Token: ${OCR_GATEWAY_SECRET}" \
+            "${OCR_GATEWAY_URL}/v1/jobs/${job_id}")
+          echo "$st"
+          echo "$st" | grep -q '"status"[[:space:]]*:[[:space:]]*"success"' && exit 0
+          echo "$st" | grep -q '"status"[[:space:]]*:[[:space:]]*"failed"' && exit 1
+          sleep 10
+        done
+        echo "timeout waiting for gateway job"
+        exit 1
+      fi

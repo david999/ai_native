@@ -1,0 +1,10 @@
+.git
+.gitignore
+docs/
+deploy/
+*.md
+.build/config.json.bak
+.build/ocr-result.json
+.build/ocr-stderr.log
+tests/
+requirements-dev.txt

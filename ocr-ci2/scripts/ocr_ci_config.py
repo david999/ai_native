@@ -1,9 +1,13 @@
-"""Shared helpers for ~/.opencodereview/config.json (OCR CI extension fields).
+"""~/.opencodereview/config.json 共享读取（OCR CI 扩展字段）。
 
-Used by scripts/acceptance/bake_ocr_config.py, post_ocr_to_gitlab.py, and verify_local_ocr.py.
+供 scripts/acceptance/bake_ocr_config.py 与 post_ocr_to_gitlab.py 使用。
 
-OCR upstream only documents llm.* in config.json; this repo extends the same file with
-gitlab.api_token for GitLab MR posting without CI Variables.
+OCR 官方仅文档化 llm.*；本仓库在同一文件中扩展 gitlab.api_token，免 CI Variable。
+
+逻辑清单：
+- config_search_paths()：OCR_CONFIG_PATH → /root/.opencodereview → 用户目录
+- resolve_gitlab_api_token()：首个可读配置生效
+- 不做：合并多个配置文件；校验 LLM 密钥
 """
 
 from __future__ import annotations
@@ -15,16 +19,16 @@ from typing import Any
 
 
 def user_config_path() -> Path:
-    """Return the OCR CLI default config path on the current OS."""
+    """返回当前 OS 下 OCR CLI 默认 config.json 路径。"""
     return Path.home() / ".opencodereview" / "config.json"
 
 
 def config_search_paths() -> list[Path]:
-    """Ordered paths for resolving gitlab.api_token (first hit wins).
+    """解析 gitlab.api_token 的搜索路径（先命中者优先）。
 
-    OCR_CONFIG_PATH: explicit override (tests / local debugging)
-    /root/.opencodereview/config.json: baked into ocr-ci Docker image
-    user_config_path(): developer machine CLI config
+    OCR_CONFIG_PATH：显式覆盖（测试/本地调试）
+    /root/.opencodereview/config.json：ocr-ci Docker 镜像内 bake 路径
+    user_config_path()：开发机 CLI 配置
     """
     paths: list[Path] = []
     env_path = os.environ.get("OCR_CONFIG_PATH", "").strip()
@@ -44,7 +48,7 @@ def load_config_file(path: Path) -> dict[str, Any] | None:
 
 
 def gitlab_api_token_from_config(data: dict[str, Any]) -> str:
-    """Extract GitLab PAT from baked config (gitlab.api_token or legacy keys)."""
+    """从 bake 配置提取 GitLab PAT（gitlab.api_token 或旧字段）。"""
     gitlab = data.get("gitlab")
     if isinstance(gitlab, dict):
         token = gitlab.get("api_token") or gitlab.get("auth_token") or ""
@@ -55,7 +59,7 @@ def gitlab_api_token_from_config(data: dict[str, Any]) -> str:
 
 
 def resolve_gitlab_api_token() -> str:
-    """Resolve token for post_ocr_to_gitlab.py when GITLAB_API_TOKEN env is unset."""
+    """GITLAB_API_TOKEN 未设置时，为 post_ocr_to_gitlab.py 解析 token。"""
     for path in config_search_paths():
         data = load_config_file(path)
         if not data:

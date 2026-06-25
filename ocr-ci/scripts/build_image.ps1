@@ -19,7 +19,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $OcrCiDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$BakeScript = Join-Path $OcrCiDir "scripts\bake_ocr_config.py"
+$BakeScript = Join-Path $OcrCiDir "scripts\acceptance\bake_ocr_config.py"
 $OutConfig = Join-Path $OcrCiDir ".build\config.json"
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Post OpenCodeReview JSON output to GitLab MR discussions/notes.
+"""将 OpenCodeReview JSON 输出发帖到 GitLab MR 讨论/Note。
 
-Reads paths from OCR_RESULT_PATH / OCR_STDERR_PATH (default /tmp/ocr-result.json).
-See ocr-ci/docs/本地部署指南.md and gitlab_mr.py.
+从 OCR_RESULT_PATH / OCR_STDERR_PATH 读取路径（默认 /tmp/ocr-result.json）。
+
+逻辑清单：
+- Token：GitLabMrClient.from_env()（config.json、GITLAB_API_TOKEN、CI_JOB_TOKEN）
+- 退出码：无 token 时非零；strict 模式由环境变量 OCR_POST_STRICT 控制
+- 不做：执行 ocr review；解析 CLI 参数（仅 env 入口）
 """
 
 from __future__ import annotations

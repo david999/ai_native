@@ -84,6 +84,10 @@ docker compose up -d gitlab-runner
 
 配置目录：`evn/gitlab-runner/config/config.toml`（compose 挂载 `../gitlab-runner/config`）。
 
+**Rancher Desktop**：Job 容器访问宿主机 Gateway/AICR 时用 `host.docker.internal`；**不要**在 `config.toml` 设置 `extra_hosts = ["host.docker.internal:host-gateway"]`（会解析到 `172.17.0.1`，CI `curl` exit 7）。Rancher 会自动注入正确宿主机 IP。
+
+跑前校验：`test_data/scripts/verify_l3b_runner.ps1`（含 Gateway `:8010` 与 CI 镜像检查）。
+
 ## 与 Docker Desktop 的关系
 
 - **禁止**：Docker Desktop（商业许可）

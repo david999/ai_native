@@ -6,7 +6,7 @@
 #
 # 前置：
 #   cd ocr-ci && .\scripts\build_image.ps1
-#   或手动：python scripts/bake_ocr_config.py --from-user-config -o .build/config.json && docker build -t ocr-ci:local .
+#   或手动：python scripts/acceptance/bake_ocr_config.py --from-user-config -o .build/config.json && docker build -t ocr-ci:local .
 #
 # GitLab 发帖 token 已写入镜像 config.json 的 gitlab.api_token 时无需配置
 # GitLab 仅需 OCR_CI_IMAGE（snippet 默认 ocr-ci:local）或使用群组 Variables 覆盖

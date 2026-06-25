@@ -1,0 +1,5 @@
+.build/
+.gateway-work/
+deploy/local/gateway.env
+deploy/prod/native/gateway.env
+deploy/prod/docker/gateway.env
