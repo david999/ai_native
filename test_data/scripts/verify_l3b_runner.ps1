@@ -4,6 +4,7 @@ param(
     [string]$AicrUrl = "http://localhost:8001",
     [string]$GatewayUrl = "http://localhost:8010",
     [string]$ProjectPath = "java_group/datacalc-web",
+    [switch]$OcrGatewayOnly,
     [switch]$Json
 )
 
@@ -137,12 +138,14 @@ function Invoke-JobNetworkProbe {
 docker image inspect gitlab/gitlab-runner:latest 2>$null | Out-Null
 Add-Check "runner_image" ($LASTEXITCODE -eq 0) "gitlab/gitlab-runner:latest present" "evn/gitlab/start_runner.ps1"
 
-# AICR on host
-try {
-    $hr = Invoke-WebRequest -Uri "$AicrUrl/health" -UseBasicParsing -TimeoutSec 5
-    Add-Check "aicr_host" ($hr.StatusCode -eq 200) "$AicrUrl/health ok"
-} catch {
-    Add-Check "aicr_host" $false "AICR not reachable at $AicrUrl" "cd aicr-reviewer; .\scripts\run_local.ps1"
+# AICR on host (skip for OCR Gateway-only E2E)
+if (-not $OcrGatewayOnly) {
+    try {
+        $hr = Invoke-WebRequest -Uri "$AicrUrl/health" -UseBasicParsing -TimeoutSec 5
+        Add-Check "aicr_host" ($hr.StatusCode -eq 200) "$AicrUrl/health ok"
+    } catch {
+        Add-Check "aicr_host" $false "AICR not reachable at $AicrUrl" "cd aicr-reviewer; .\scripts\run_local.ps1"
+    }
 }
 
 # Gateway on host (OCR CI)
@@ -176,9 +179,11 @@ Add-Check "gateway_from_runner_network" $gatewayProbeOk $(if ($gatewayProbeOk) {
     "Remove extra_hosts host-gateway from config.toml; cd ocr-ci2; .\deploy\local\run.ps1"
 
 # AICR from job network (host.docker.internal)
-$probeOk = Invoke-JobNetworkProbe -TargetUrl "http://host.docker.internal:8001/health" -RunnerCfg $runnerCfgText
-Add-Check "aicr_from_runner_network" $probeOk $(if ($probeOk) { "host.docker.internal:8001 ok from gitlab_default" } else { "cannot reach AICR from job network" }) `
-    "Start AICR on host :8001; remove extra_hosts host-gateway from config.toml"
+if (-not $OcrGatewayOnly) {
+    $probeOk = Invoke-JobNetworkProbe -TargetUrl "http://host.docker.internal:8001/health" -RunnerCfg $runnerCfgText
+    Add-Check "aicr_from_runner_network" $probeOk $(if ($probeOk) { "host.docker.internal:8001 ok from gitlab_default" } else { "cannot reach AICR from job network" }) `
+        "Start AICR on host :8001; remove extra_hosts host-gateway from config.toml"
+}
 
 $failed = @($checks | Where-Object { -not $_.ok })
 $report = @{

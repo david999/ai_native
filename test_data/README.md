@@ -7,6 +7,7 @@
 ```
 test_data/
 ├── datacalc-web/               # OCR Gateway 联调样例（Java，含 .gitlab-ci.yml）
+├── e2e/ocr-gateway/            # OCR Gateway 自动化 E2E（4 场景，见 README）
 ├── spring-cloud-demo/          # AICR Reviewer 等业务仓（自有 .git）
 ├── fixtures/scenarios/         # 固定测试场景（纳入 monorepo）
 │   ├── manifest.yaml
@@ -25,6 +26,7 @@ test_data/
 | CI 片段 | 与 [`ocr-ci2/deploy/prod/ci/snippet.native-host.yml`](../ocr-ci2/deploy/prod/ci/snippet.native-host.yml) 对齐 |
 | 文档 | [ocr-ci2/docs/测试与验收.md](../ocr-ci2/docs/测试与验收.md) |
 | 跑前检查 | `test_data/scripts/verify_l3b_runner.ps1 -ProjectPath java_group/datacalc-web` |
+| **自动化 E2E** | [`e2e/ocr-gateway/run_e2e.ps1`](e2e/ocr-gateway/run_e2e.ps1) — D01–D04 全链路 |
 
 与 **AICR Reviewer（:8001）**、`spring-cloud-demo` 验收相互独立；勿混淆端口与 CI 变量。
 
@@ -57,5 +59,6 @@ git clone http://localhost:8000/java_group/spring-cloud-demo.git
 
 - AICR 分层：[docs/测试与验收.md](../docs/测试与验收.md)
 - OCR Gateway L3b 跑前：`test_data/scripts/verify_l3b_runner.ps1`
-- OCR Gateway L3b 跑后：`test_data/scripts/collect_l3b_report.py --project-id <id> --mr-iid <iid>`
+- **OCR Gateway 自动化 E2E**：`test_data/e2e/ocr-gateway/run_e2e.ps1 -All`
+- OCR Gateway 跑后报告：`test-results/ocr-e2e-*/ocr_e2e_report.zh.md`（由 E2E 脚本生成）
 
