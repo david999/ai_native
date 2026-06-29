@@ -1,7 +1,11 @@
-"""Scan OCR session JSONL for severity telemetry (~/.opencodereview/sessions).
+"""Scan OCR session JSONL for severity and token telemetry (~/.opencodereview/sessions).
 
-Used by the Severity Dashboard (:5484). Rules align with E2E lib/ocr_session.py:
-only ``type=tool_call`` + ``tool_name=code_comment`` arguments are counted.
+Used by the Severity Dashboard (:5484) and ``session_token_report.py``.
+Severity rules align with E2E lib/ocr_session.py: only ``type=tool_call`` +
+``tool_name=code_comment`` arguments are counted.
+
+Token totals match official OCR viewer (``store.go``): sum ``usage`` on
+``type=llm_response`` events.
 """
 
 from __future__ import annotations
@@ -70,6 +74,43 @@ class SeverityComment:
 
 
 @dataclass
+class TokenUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_read_tokens: int = 0
+    request_count: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    def add(self, other: TokenUsage) -> None:
+        self.prompt_tokens += other.prompt_tokens
+        self.completion_tokens += other.completion_tokens
+        self.cache_read_tokens += other.cache_read_tokens
+        self.request_count += other.request_count
+
+    def add_usage_dict(self, usage: dict[str, Any] | None) -> None:
+        if not usage:
+            return
+        self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
+        self.completion_tokens += int(usage.get("completion_tokens") or 0)
+        self.cache_read_tokens += int(usage.get("cache_read_tokens") or 0)
+        self.request_count += 1
+
+
+def format_token_count(value: int) -> str:
+    """Human-readable token count (e.g. 118432 -> 118K)."""
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 10_000:
+        return f"{round(value / 1000)}K"
+    if value >= 1000:
+        return f"{value / 1000:.1f}K"
+    return str(value)
+
+
+@dataclass
 class SessionTelemetry:
     session_id: str
     repo_slug: str
@@ -80,6 +121,11 @@ class SessionTelemetry:
     jsonl_path: str = ""
     severity: SeverityCounts = field(default_factory=SeverityCounts)
     high_comments: list[SeverityComment] = field(default_factory=list)
+    tokens: TokenUsage = field(default_factory=TokenUsage)
+    files_reviewed: int | None = None
+    duration_seconds: float | None = None
+    llm_failures: int = 0
+    tool_counts: dict[str, int] = field(default_factory=dict)
 
     @property
     def has_high(self) -> bool:
@@ -99,6 +145,8 @@ class RepoTelemetry:
     session_count: int
     last_modified: datetime | None
     severity: SeverityCounts = field(default_factory=SeverityCounts)
+    tokens: TokenUsage = field(default_factory=TokenUsage)
+    latest_tokens: TokenUsage = field(default_factory=TokenUsage)
 
     @property
     def has_high(self) -> bool:
@@ -195,7 +243,7 @@ def _mtime_as_datetime(path: Path) -> datetime | None:
 
 
 def scan_session_jsonl(path: Path) -> SessionTelemetry:
-    """Parse one JSONL file and return severity telemetry."""
+    """Parse one JSONL file and return severity + token telemetry."""
     repo_slug = path.parent.name
     session_id = path.stem
     cwd = ""
@@ -203,6 +251,11 @@ def scan_session_jsonl(path: Path) -> SessionTelemetry:
     timestamp: datetime | None = None
     severity = SeverityCounts()
     high_comments: list[SeverityComment] = []
+    tokens = TokenUsage()
+    files_reviewed: int | None = None
+    duration_seconds: float | None = None
+    llm_failures = 0
+    tool_counts: dict[str, int] = {}
 
     with path.open(encoding="utf-8") as handle:
         for line in handle:
@@ -222,7 +275,38 @@ def scan_session_jsonl(path: Path) -> SessionTelemetry:
                 timestamp = _parse_timestamp(obj.get("timestamp")) or timestamp
                 continue
 
-            if evt_type != "tool_call" or obj.get("tool_name") != "code_comment":
+            if evt_type == "session_end":
+                if obj.get("files_reviewed") is not None:
+                    try:
+                        files_reviewed = int(obj["files_reviewed"])
+                    except (TypeError, ValueError):
+                        pass
+                if obj.get("duration_seconds") is not None:
+                    try:
+                        duration_seconds = float(obj["duration_seconds"])
+                    except (TypeError, ValueError):
+                        pass
+                if obj.get("llm_failures") is not None:
+                    try:
+                        llm_failures = int(obj["llm_failures"])
+                    except (TypeError, ValueError):
+                        pass
+                continue
+
+            if evt_type == "llm_response":
+                usage = obj.get("usage")
+                if isinstance(usage, dict):
+                    tokens.add_usage_dict(usage)
+                continue
+
+            if evt_type != "tool_call":
+                continue
+
+            tool_name = str(obj.get("tool_name") or "")
+            if tool_name:
+                tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+
+            if tool_name != "code_comment":
                 continue
 
             text = _comment_text_from_tool_call(obj)
@@ -273,7 +357,34 @@ def scan_session_jsonl(path: Path) -> SessionTelemetry:
         jsonl_path=str(path),
         severity=severity,
         high_comments=high_comments,
+        tokens=tokens,
+        files_reviewed=files_reviewed,
+        duration_seconds=duration_seconds,
+        llm_failures=llm_failures,
+        tool_counts=tool_counts,
     )
+
+
+def iter_all_sessions(root: Path | None = None) -> list[SessionTelemetry]:
+    """Scan every session JSONL under *root* (default: sessions_root())."""
+    root = root or sessions_root()
+    if not root.is_dir():
+        return []
+
+    sessions: list[SessionTelemetry] = []
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if _safe_repo_dir(root, entry.name) is None:
+            continue
+        for jsonl in sorted(entry.glob("*.jsonl")):
+            if not _is_safe_path_segment(jsonl.stem):
+                continue
+            try:
+                sessions.append(scan_session_jsonl(jsonl))
+            except OSError:
+                continue
+    return sessions
 
 
 def list_repo_sessions(root: Path, encoded_repo: str) -> list[SessionTelemetry]:
@@ -314,8 +425,10 @@ def discover_repos(root: Path | None = None) -> list[RepoTelemetry]:
         severity = SeverityCounts()
         last_modified: datetime | None = None
         display_name = entry.name
+        repo_tokens = TokenUsage()
         for session in sessions:
             severity.add(session.severity)
+            repo_tokens.add(session.tokens)
             if session.last_modified and (
                 last_modified is None or session.last_modified > last_modified
             ):
@@ -333,6 +446,8 @@ def discover_repos(root: Path | None = None) -> list[RepoTelemetry]:
                 session_count=len(sessions),
                 last_modified=last_modified,
                 severity=severity,
+                tokens=repo_tokens,
+                latest_tokens=sessions[0].tokens if sessions else TokenUsage(),
             )
         )
 

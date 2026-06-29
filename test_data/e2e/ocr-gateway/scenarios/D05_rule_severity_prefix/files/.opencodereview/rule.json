@@ -1,8 +1,23 @@
 {
+  "exclude": [
+    "**/target/**",
+    "**/*.class",
+    "**/test/**",
+    "**/*Test.java",
+    "**/*Tests.java"
+  ],
   "rules": [
     {
-      "path": "**",
-      "rule": "请遵循 AGENTS.md 中的项目编码规范进行审查。结合 .ai 目录下资料进行更深入的审查。每条评审评论必须以 [HIGH]/[MEDIUM]/[LOW] 开头标记严重级别。HIGH=安全漏洞/崩溃/数据丢失；MEDIUM=性能/可维护性/边界问题；LOW=代码风格/可读性。"
+      "path": "src/**",
+      "rule": "请遵循 AGENTS.md 中的项目编码规范进行审查。结合 .ai/rules 目录下资料进行更深入的审查。每条评审评论必须以 [HIGH]/[MEDIUM]/[LOW] 开头标记严重级别。HIGH=安全漏洞/崩溃/数据丢失；MEDIUM=性能/可维护性/边界问题；LOW=代码风格/可读性。"
+    },
+    {
+      "path": ".opencodereview/**",
+      "rule": "仅检查 rule 配置合理性（路径 glob、文案清晰度），无需读取 AGENTS.md 或 .ai 目录。"
+    },
+    {
+      "path": "**/*.xml",
+      "rule": "MyBatis mapper XML：检查 SQL 注入风险、动态 SQL 拼接、索引使用；无需读取 AGENTS.md。"
     }
   ]
 }

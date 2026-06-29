@@ -2,6 +2,7 @@
 
 **OCR 部署一次、Gateway 常驻**；每个 MR 的 GitLab CI Job 仅 **HTTP 触发** Gateway，由 Gateway 执行 `ocr review` 并回写 MR 评论。
 
+**项目汇报总结**（概念、选型、架构、亮点）：[docs/项目汇报总结.md](docs/项目汇报总结.md)  
 架构见 [docs/架构说明.md](docs/架构说明.md)。  
 **联调与 E2E 验收**（含 monorepo 样例仓）见 [docs/测试与验收.md](docs/测试与验收.md)。
 

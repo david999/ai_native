@@ -46,6 +46,47 @@ class ReviewRequest:
     commit_sha: str
 
 
+def build_ocr_review_argv(
+    ocr_executable: str,
+    work_dir: str,
+    req: ReviewRequest,
+) -> list[str]:
+    """Build ``ocr review`` argv; optional ``--exclude`` / ``--max-tools`` from env."""
+    argv = [
+        ocr_executable,
+        "review",
+        "--repo",
+        work_dir,
+        "--from",
+        f"origin/{req.target_branch}",
+        "--to",
+        req.commit_sha,
+        "--format",
+        "json",
+        "--audience",
+        "agent",
+        "--concurrency",
+        gw_config.OCR_CONCURRENCY,
+    ]
+    if gw_config.OCR_REVIEW_EXCLUDE:
+        if gw_config.ocr_review_supports_flag("--exclude"):
+            argv.extend(["--exclude", gw_config.OCR_REVIEW_EXCLUDE])
+        else:
+            logger.warning(
+                "OCR_REVIEW_EXCLUDE is set but installed ocr CLI lacks --exclude; "
+                "use rule.json exclude or upgrade OpenCodeReview CLI"
+            )
+    if gw_config.OCR_REVIEW_MAX_TOOLS:
+        if gw_config.ocr_review_supports_flag("--max-tools"):
+            argv.extend(["--max-tools", gw_config.OCR_REVIEW_MAX_TOOLS])
+        else:
+            logger.warning(
+                "OCR_REVIEW_MAX_TOOLS is set but installed ocr CLI lacks --max-tools; "
+                "upgrade OpenCodeReview CLI to apply this limit"
+            )
+    return argv
+
+
 @dataclass
 class ReviewJob:
     job_id: str
@@ -164,22 +205,11 @@ def _run_review_sync(job_id: str, req: ReviewRequest) -> None:
             "w", encoding="utf-8"
         ) as err:
             proc = subprocess.run(
-                [
+                build_ocr_review_argv(
                     gw_config.resolve_executable("ocr"),
-                    "review",
-                    "--repo",
                     str(work_dir),
-                    "--from",
-                    f"origin/{req.target_branch}",
-                    "--to",
-                    req.commit_sha,
-                    "--format",
-                    "json",
-                    "--audience",
-                    "agent",
-                    "--concurrency",
-                    gw_config.OCR_CONCURRENCY,
-                ],
+                    req,
+                ),
                 stdout=out,
                 stderr=err,
                 timeout=3600,

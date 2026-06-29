@@ -142,7 +142,7 @@ GitLab:   Job env GITLAB_API_TOKEN  >  config.json gitlab.api_token  >  CI_JOB_T
 
 三方案对比见 [docs/OCR-GitLab-Webhook集成指南.md](../docs/OCR-GitLab-Webhook集成指南.md) §6。
 
-**方案 3（OCR 常驻 + 轻 CI）**：见 [`ocr-ci2/`](../ocr-ci2/) 与 [方案评估](../ocr-ci2/docs/方案评估.md)。
+**方案 3（OCR 常驻 + 轻 CI）**：见 [`ocr-ci2/`](../ocr-ci2/) 与 [项目汇报总结](../ocr-ci2/docs/项目汇报总结.md)。
 
 ## 开发与测试
 

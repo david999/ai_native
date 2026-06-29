@@ -21,6 +21,7 @@ if str(_SCRIPTS) not in sys.path:
 
 from session_telemetry import (  # noqa: E402
     discover_repos,
+    format_token_count,
     list_repo_sessions,
     load_session,
     official_viewer_url,
@@ -49,6 +50,7 @@ def _format_time(value: datetime | None) -> str:
 
 
 templates.env.filters["format_time"] = _format_time
+templates.env.filters["format_tokens"] = format_token_count
 templates.env.filters["urlquote_path"] = lambda value: quote(str(value), safe="")
 
 
@@ -85,6 +87,8 @@ async def index(
                 "high": repo.severity.high,
                 "medium": repo.severity.medium,
                 "low": repo.severity.low,
+                "latest_tokens": repo.latest_tokens.total,
+                "latest_tokens_raw": repo.latest_tokens.total,
                 "last_modified": repo.last_modified,
                 "has_high": repo.has_high,
             }
@@ -130,6 +134,10 @@ async def repo_sessions(
                 "high": session.severity.high,
                 "medium": session.severity.medium,
                 "low": session.severity.low,
+                "total_tokens": session.tokens.total,
+                "prompt_tokens": session.tokens.prompt_tokens,
+                "completion_tokens": session.tokens.completion_tokens,
+                "llm_requests": session.tokens.request_count,
                 "has_high": session.has_high,
                 "official_url": session.official_viewer_url(),
             }

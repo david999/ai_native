@@ -35,6 +35,7 @@
                 <th class="sev-high">HIGH</th>
                 <th class="sev-medium">MEDIUM</th>
                 <th class="sev-low">LOW</th>
+                <th title="最近一次 session 的 prompt+completion 总计">Latest Tokens</th>
                 <th>Last Modified</th>
                 <th>操作</th>
             </tr>
@@ -50,6 +51,7 @@
                 <td class="sev-high">{{ repo.high }}</td>
                 <td class="sev-medium">{{ repo.medium }}</td>
                 <td class="sev-low">{{ repo.low }}</td>
+                <td class="tokens" title="prompt+completion 总计 {{ repo.latest_tokens_raw }}">{{ repo.latest_tokens | format_tokens }}</td>
                 <td>{{ repo.last_modified | format_time }}</td>
                 <td>
                     {% if repo.has_high %}

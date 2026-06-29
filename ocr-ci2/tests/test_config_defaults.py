@@ -8,7 +8,6 @@ from __future__ import annotations
 import importlib
 import os
 from pathlib import Path
-from pathlib import Path
 
 
 def _reload_config():
@@ -46,3 +45,4 @@ def test_gateway_native_env_example_exists():
     text = example.read_text(encoding="utf-8")
     assert "OCR_GATEWAY_SECRET" in text
     assert "localhost:8000" in text
+    assert "OCR_REVIEW_EXCLUDE" in text

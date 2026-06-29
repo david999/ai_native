@@ -4,14 +4,17 @@
 - 解析：POST_SCRIPT、WORK_ROOT、GitLab URL（env + 仓库/Docker 启发式）
 - gateway_secret()：每次请求时读取（便于测试 monkeypatch）
 - validate_project_id()：仅允许数字 GitLab project id
+- ocr_review_supports_flag()：探测已安装 ocr CLI 是否支持某 review 参数
 - 不做：import 时校验 ocr 是否在 PATH；不重启进程即热重载 env
 """
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -79,6 +82,8 @@ POST_SCRIPT: str = _default_post_script()
 WORK_ROOT: str = _default_work_root()
 MAX_CONCURRENT: int = max(1, int(_env("OCR_GATEWAY_MAX_CONCURRENT", "2") or "2"))
 OCR_CONCURRENCY: str = _env("OCR_REVIEW_CONCURRENCY", "4")
+OCR_REVIEW_EXCLUDE: str = _env("OCR_REVIEW_EXCLUDE")
+OCR_REVIEW_MAX_TOOLS: str = _env("OCR_REVIEW_MAX_TOOLS")
 WORKSPACE_MAX_MIRRORS: int = max(0, int(_env("OCR_GATEWAY_WORKSPACE_MAX_PROJECTS", "0") or "0"))
 MAX_JOB_HISTORY: int = max(50, int(_env("OCR_GATEWAY_MAX_JOB_HISTORY", "500") or "500"))
 GATEWAY_PORT: int = max(1, int(_env("OCR_GATEWAY_PORT", "8010") or "8010"))
@@ -112,6 +117,27 @@ def resolve_executable(name: str) -> str:
             f"{name} not found in PATH; install OpenCodeReview CLI (npm install -g @alibaba-group/open-code-review)"
         )
     return path
+
+
+@functools.lru_cache(maxsize=8)
+def ocr_review_supports_flag(flag: str) -> bool:
+    """Return True if ``ocr review --help`` lists *flag* (e.g. ``--exclude``)."""
+    needle = flag.strip()
+    if not needle:
+        return False
+    try:
+        exe = resolve_executable("ocr")
+        result = subprocess.run(
+            [exe, "review", "--help"],
+            capture_output=True,
+            timeout=15,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+    text = (result.stdout or "") + (result.stderr or "")
+    return needle in text
 
 
 _SUBPROCESS_TEXT_KW = {"text": True, "encoding": "utf-8", "errors": "replace"}

@@ -33,6 +33,15 @@
             <div class="card-label">LOW</div>
             <div class="card-value">{{ session.severity.low }}</div>
         </div>
+        <div class="card tokens-card">
+            <div class="card-label">Tokens</div>
+            <div class="card-value">{{ session.tokens.total | format_tokens }}</div>
+            <div class="card-sub muted">
+                prompt {{ session.tokens.prompt_tokens | format_tokens }} /
+                completion {{ session.tokens.completion_tokens | format_tokens }} /
+                {{ session.tokens.request_count }} LLM
+            </div>
+        </div>
     </section>
 
     {% if session.cwd %}

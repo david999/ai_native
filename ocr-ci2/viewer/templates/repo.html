@@ -33,6 +33,7 @@
                 <th class="sev-high">HIGH</th>
                 <th class="sev-medium">MEDIUM</th>
                 <th class="sev-low">LOW</th>
+                <th>Tokens</th>
                 <th>Last Modified</th>
                 <th>链接</th>
             </tr>
@@ -45,6 +46,7 @@
                 <td class="sev-high">{{ s.high }}</td>
                 <td class="sev-medium">{{ s.medium }}</td>
                 <td class="sev-low">{{ s.low }}</td>
+                <td class="tokens" title="{{ s.total_tokens }}">{{ s.total_tokens | format_tokens }}</td>
                 <td>{{ s.last_modified | format_time }}</td>
                 <td class="links">
                     <a href="{{ s.official_url }}" target="_blank" rel="noopener">官方详情</a>
