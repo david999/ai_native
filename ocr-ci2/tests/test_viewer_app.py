@@ -101,3 +101,30 @@ def test_session_detail(client, monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert "NPE" in resp.text
     assert "官方详情" in resp.text
+
+
+def test_index_shows_latest_tokens(client, monkeypatch, tmp_path):
+    monkeypatch.setenv("OCR_SESSIONS_DIR", str(tmp_path))
+    repo = tmp_path / "proj-abc"
+    jsonl = repo / "sess1.jsonl"
+    jsonl.parent.mkdir(parents=True)
+    jsonl.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "session_start", "sessionId": "sess1", "cwd": "/x/proj"}),
+                json.dumps(
+                    {
+                        "type": "llm_response",
+                        "usage": {"prompt_tokens": 12_345, "completion_tokens": 678},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Latest Tokens" in resp.text
+    assert "13K" in resp.text

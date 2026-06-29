@@ -119,25 +119,80 @@ def resolve_executable(name: str) -> str:
     return path
 
 
+def _ocr_review_help_text(exe: str) -> str:
+    result = subprocess.run(
+        [exe, "review", "--help"],
+        capture_output=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return (result.stdout or "") + (result.stderr or "")
+
+
+_OCR_VERSION_RE = re.compile(r"\bv(\d+)\.(\d+)\.(\d+)\b")
+
+
+def _ocr_semver(exe: str) -> tuple[int, int, int] | None:
+    try:
+        result = subprocess.run(
+            [exe, "version"],
+            capture_output=True,
+            timeout=10,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    text = (result.stdout or "") + (result.stderr or "")
+    match = _OCR_VERSION_RE.search(text)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+
+def _ocr_review_exclude_supported(exe: str) -> bool:
+    """``--exclude`` on ``ocr review`` shipped in npm 1.6.x; omitted from --help text."""
+    ver = _ocr_semver(exe)
+    if ver is not None:
+        return ver >= (1, 6, 0)
+    result = subprocess.run(
+        [exe, "review", "--exclude", "__ocr_probe__"],
+        capture_output=True,
+        timeout=15,
+        encoding="utf-8",
+        errors="replace",
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+    return "flag provided but not defined" not in combined
+
+
 @functools.lru_cache(maxsize=8)
 def ocr_review_supports_flag(flag: str) -> bool:
-    """Return True if ``ocr review --help`` lists *flag* (e.g. ``--exclude``)."""
+    """Return True if installed ``ocr review`` accepts *flag* (e.g. ``--exclude``)."""
     needle = flag.strip()
     if not needle:
         return False
     try:
         exe = resolve_executable("ocr")
-        result = subprocess.run(
-            [exe, "review", "--help"],
-            capture_output=True,
-            timeout=15,
-            encoding="utf-8",
-            errors="replace",
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except FileNotFoundError:
         return False
-    text = (result.stdout or "") + (result.stderr or "")
-    return needle in text
+
+    try:
+        help_text = _ocr_review_help_text(exe)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+    if needle in help_text:
+        return True
+
+    if needle == "--exclude":
+        try:
+            return _ocr_review_exclude_supported(exe)
+        except (subprocess.TimeoutExpired, OSError):
+            return False
+
+    return False
 
 
 _SUBPROCESS_TEXT_KW = {"text": True, "encoding": "utf-8", "errors": "replace"}

@@ -12,6 +12,7 @@ from session_telemetry import (
     SeverityCounts,
     count_severities_in_text,
     discover_repos,
+    iter_all_sessions,
     list_repo_sessions,
     load_session,
     scan_session_jsonl,
@@ -169,3 +170,58 @@ def test_discover_repos_display_name_from_newest_session(tmp_path: Path):
     repos = discover_repos(tmp_path)
     assert len(repos) == 1
     assert repos[0].display_name == "newest-proj"
+
+
+def test_discover_repos_latest_tokens_not_cumulative(tmp_path: Path):
+    import os
+    import time
+
+    repo = tmp_path / "slug-a"
+    _write_jsonl(
+        repo / "old.jsonl",
+        [
+            {"type": "session_start", "sessionId": "old", "cwd": "/work/proj"},
+            {
+                "type": "llm_response",
+                "usage": {"prompt_tokens": 100_000, "completion_tokens": 1_000},
+            },
+        ],
+    )
+    _write_jsonl(
+        repo / "new.jsonl",
+        [
+            {"type": "session_start", "sessionId": "new", "cwd": "/work/proj"},
+            {
+                "type": "llm_response",
+                "usage": {"prompt_tokens": 10_000, "completion_tokens": 500},
+            },
+        ],
+    )
+    os.utime(repo / "old.jsonl", (time.time() - 3600, time.time() - 3600))
+    os.utime(repo / "new.jsonl", (time.time(), time.time()))
+
+    repos = discover_repos(tmp_path)
+    assert len(repos) == 1
+    assert repos[0].latest_tokens.total == 10_500
+    assert repos[0].tokens.total == 111_500
+
+
+def test_iter_all_sessions_skips_unsafe_repo_dir(tmp_path: Path):
+    safe = tmp_path / "proj-safe"
+    _write_jsonl(
+        safe / "s1.jsonl",
+        [
+            {"type": "session_start", "sessionId": "s1"},
+            {"type": "llm_response", "usage": {"prompt_tokens": 100, "completion_tokens": 10}},
+        ],
+    )
+    unsafe = tmp_path / "bad..repo"
+    unsafe.mkdir()
+    (unsafe / "skip.jsonl").write_text(
+        '{"type":"session_start","sessionId":"skip"}\n',
+        encoding="utf-8",
+    )
+
+    sessions = iter_all_sessions(tmp_path)
+    assert len(sessions) == 1
+    assert sessions[0].session_id == "s1"
