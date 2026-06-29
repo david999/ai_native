@@ -3,69 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Severity Dashboard - OCR</title>
+    <title>MR 评审流 - OCR Gateway</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <nav class="breadcrumb">
-    <a href="/">OCR Severity Dashboard</a>
-    <span class="muted">:5484</span>
+    <a href="/">OCR Gateway Dashboard</a>
+    <span class="muted">:8010</span>
+    <span class="nav-links">
+        <a href="/repos">按仓库</a>
+    </span>
 </nav>
 <main>
-    <h1>Repositories</h1>
+    <h1>MR 评审流</h1>
     <p class="hint">
-        扫描 <code>{{ sessions_root }}</code>；
-        官方详情见 <a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
+        展示每个 MR 最近一次 Gateway 评审结果；深度调试可开
+        <code>ocr viewer</code> →
+        <a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
     </p>
 
+    <section class="kpi-bar">
+        <div class="kpi"><span class="kpi-label">今日评审</span><span class="kpi-value">{{ kpis.today_reviews }}</span></div>
+        <div class="kpi"><span class="kpi-label">最新 HIGH 合计</span><span class="kpi-value sev-high">{{ kpis.open_high }}</span></div>
+        <div class="kpi"><span class="kpi-label">队列深度</span><span class="kpi-value">{{ kpis.queue_depth }}</span></div>
+        <div class="kpi"><span class="kpi-label">7 日中位 Token</span><span class="kpi-value">{{ kpis.median_tokens_7d_fmt }}</span></div>
+    </section>
+
     <div class="filters">
+        <form class="search-form" method="get" action="/">
+            <input type="search" name="q" value="{{ query }}" placeholder="按项目路径过滤…">
+            <button type="submit" class="btn">搜索</button>
+        </form>
         {% if only_high %}
         <a class="btn" href="/">显示全部</a>
         {% else %}
         <a class="btn btn-warn" href="/?highlight=high">仅含 HIGH</a>
         {% endif %}
+        {% if only_failed %}
+        <a class="btn" href="/">清除失败筛选</a>
+        {% else %}
+        <a class="btn" href="/?highlight=failed">仅失败</a>
+        {% endif %}
     </div>
 
-    {% if repos %}
+    {% if mr_rows %}
     <table class="table">
         <thead>
             <tr>
-                <th>Repository</th>
-                <th>Sessions</th>
+                <th>项目 / MR</th>
+                <th>分支 / Commit</th>
+                <th>状态</th>
                 <th class="sev-high">HIGH</th>
-                <th class="sev-medium">MEDIUM</th>
+                <th class="sev-medium">MED</th>
                 <th class="sev-low">LOW</th>
-                <th title="最近一次 session 的 prompt+completion 总计">Latest Tokens</th>
-                <th>Last Modified</th>
+                <th>评论</th>
+                <th>Tokens</th>
+                <th>评审时间</th>
+                <th>摘要</th>
                 <th>操作</th>
             </tr>
         </thead>
         <tbody>
-        {% for repo in repos %}
-            <tr{% if repo.has_high %} class="row-high"{% endif %}>
+        {% for row in mr_rows %}
+            <tr{% if row.has_high %} class="row-high"{% elif row.status == 'failed' %} class="row-failed"{% elif row.status in ('queued','running') %} class="row-running"{% endif %}>
                 <td>
-                    <a href="{{ repo.repo_url }}">{{ repo.display_name }}</a>
-                    <div class="slug muted">{{ repo.encoded_path }}</div>
+                    <div>{{ row.project_path }}</div>
+                    <a href="{{ row.mr_url }}" target="_blank" rel="noopener">{{ row.mr_label }}</a>
                 </td>
-                <td>{{ repo.session_count }}</td>
-                <td class="sev-high">{{ repo.high }}</td>
-                <td class="sev-medium">{{ repo.medium }}</td>
-                <td class="sev-low">{{ repo.low }}</td>
-                <td class="tokens" title="prompt+completion 总计 {{ repo.latest_tokens_raw }}">{{ repo.latest_tokens | format_tokens }}</td>
-                <td>{{ repo.last_modified | format_time }}</td>
                 <td>
-                    {% if repo.has_high %}
-                    <span class="badge badge-high">HIGH 告警</span>
+                    <div>{{ row.target_branch or "—" }}</div>
+                    <code>{{ row.commit_short }}</code>
+                </td>
+                <td><span class="status status-{{ row.status }}">{{ row.status }}</span></td>
+                <td class="sev-high">{{ row.high }}</td>
+                <td class="sev-medium">{{ row.medium }}</td>
+                <td class="sev-low">{{ row.low }}</td>
+                <td>{{ row.comment_count }}</td>
+                <td class="tokens">{{ row.total_tokens_fmt }}</td>
+                <td>{{ row.finished_at | format_time }}</td>
+                <td class="preview-cell">
+                    {% for p in row.high_preview %}
+                    <div class="preview-item"><code>{{ p.file_path }}</code> {{ p.snippet[:80] }}{% if p.snippet|length > 80 %}…{% endif %}</div>
+                    {% else %}
+                    <span class="muted">—</span>
+                    {% endfor %}
+                </td>
+                <td class="links">
+                    <a href="{{ row.mr_history_url }}">历史</a>
+                    {% if row.session_url %}
+                    <a href="{{ row.session_url }}">Session</a>
+                    <a href="{{ row.official_url }}" target="_blank" rel="noopener" title="官方 Viewer（Token 按文件）">:5483</a>
                     {% endif %}
-                    <a href="{{ repo.repo_url }}">Sessions</a>
                 </td>
             </tr>
         {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p>No session data found. Run <code>ocr review</code> first.</p>
+    <p class="muted">暂无 Gateway MR 评审记录。触发 CI 或 POST <code>/v1/review/merge-request</code> 后将出现在此。</p>
     {% endif %}
+
+    {% if local_repos %}
+    <details class="local-sessions">
+        <summary>本地 Session（非 Gateway 索引）</summary>
+        <table class="table compact">
+            <thead>
+                <tr>
+                    <th>Repository</th>
+                    <th>Sessions</th>
+                    <th class="sev-high">HIGH</th>
+                    <th>Latest Tokens</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for repo in local_repos %}
+                <tr>
+                    <td><a href="{{ repo.repo_url }}">{{ repo.display_name }}</a></td>
+                    <td>{{ repo.session_count }}</td>
+                    <td class="sev-high">{{ repo.high }}</td>
+                    <td>{{ repo.latest_tokens | format_tokens }}</td>
+                    <td><a href="{{ repo.repo_url }}">Sessions</a></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
+
+    <footer class="page-footer muted">
+        官方 OCR Viewer（FileTokenBreakdown）：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
+    </footer>
 </main>
 </body>
 </html>

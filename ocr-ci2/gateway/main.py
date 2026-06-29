@@ -1,20 +1,19 @@
-"""OCR Gateway HTTP API — GitLab CI MR 流水线轻量触发层。
-
-逻辑清单：
-- 鉴权：X-OCR-Gateway-Token 须与 OCR_GATEWAY_SECRET 一致（未配置 secret 返回 503）
-- POST /v1/review/merge-request：校验 project_id、异步入队、返回 202
-- GET /v1/jobs/{id}：内存 job 状态查询
-- 不做：POST 时等待 OCR 完成；跨重启持久化 job；启动时校验 ocr 二进制
-"""
+"""OCR Gateway HTTP API + Dashboard UI on :8010."""
 
 from __future__ import annotations
 
 import logging
+import sys
 import uuid
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from gateway import config as gw_config
 from gateway.review_service import (
@@ -24,11 +23,13 @@ from gateway.review_service import (
     queue_depth,
     workspace_mirror_count,
 )
+from viewer.routes import mount_dashboard
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="OCR Gateway", version="0.1.0")
+app = FastAPI(title="OCR Gateway", version="0.2.0", docs_url="/docs", redoc_url=None)
+mount_dashboard(app)
 
 
 class MergeRequestReviewBody(BaseModel):
@@ -49,15 +50,13 @@ class JobStatusResponse(BaseModel):
     job_id: str
     status: str
     message: str
+    session_id: str = ""
+    encoded_repo: str = ""
 
 
 def verify_gateway_token(
     x_ocr_gateway_token: Annotated[str | None, Header()] = None,
 ) -> None:
-    """拒绝未配置 secret 或 token 错误的请求。
-
-    不做：限流；记录 token 明文。
-    """
     secret = gw_config.gateway_secret()
     if not secret:
         raise HTTPException(
@@ -77,6 +76,7 @@ def health() -> dict[str, str | int]:
         "max_concurrent": gw_config.MAX_CONCURRENT,
         "workspace_mirrors": workspace_mirror_count(),
         "workspace_max_mirrors": gw_config.WORKSPACE_MAX_MIRRORS,
+        "dashboard": "enabled",
     }
 
 
@@ -87,10 +87,6 @@ def health() -> dict[str, str | int]:
     dependencies=[Depends(verify_gateway_token)],
 )
 def trigger_mr_review(body: MergeRequestReviewBody) -> ReviewAcceptedResponse:
-    """接受 MR 评审任务；在后台线程异步执行 OCR。
-
-    不做：阻塞至评审结束；按 project_id+mr_iid 全局去重。
-    """
     try:
         gw_config.validate_project_id(body.project_id)
     except ValueError as exc:
@@ -126,4 +122,10 @@ def job_status(job_id: str) -> JobStatusResponse:
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="job not found")
-    return JobStatusResponse(job_id=job.job_id, status=job.status, message=job.message)
+    return JobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        message=job.message,
+        session_id=job.session_id,
+        encoded_repo=job.encoded_repo,
+    )

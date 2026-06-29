@@ -27,6 +27,8 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 from gitlab_mr import GitLabMrClient
 from ocr_ci_config import resolve_gitlab_api_token
+from review_index import append_review_record, build_record_from_session
+from session_job_link import find_session_for_job
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +95,23 @@ class ReviewJob:
     status: str  # queued | running | success | failed
     message: str = ""
     finished_at: float | None = field(default=None)
+    project_id: str = ""
+    project_path: str = ""
+    mr_iid: str = ""
+    target_branch: str = ""
+    commit_sha: str = ""
+    started_at: float | None = field(default=None)
+    session_id: str = ""
+    encoded_repo: str = ""
+
+
+def list_active_jobs() -> list[ReviewJob]:
+    with _jobs_lock:
+        return [
+            job
+            for job in _jobs.values()
+            if job.status in ("queued", "running")
+        ]
 
 
 _jobs: dict[str, ReviewJob] = {}
@@ -173,11 +192,66 @@ def _git_error_message(exc: subprocess.CalledProcessError) -> str:
     return f"git error: {detail}"
 
 
+def _persist_review_index(
+    job_id: str,
+    req: ReviewRequest,
+    *,
+    status: str,
+    message: str = "",
+    comment_count: int = 0,
+    session=None,
+) -> None:
+    try:
+        record = build_record_from_session(
+            job_id=job_id,
+            req=req,
+            status=status,
+            message=message,
+            comment_count=comment_count,
+            session=session,
+        )
+        append_review_record(record)
+    except OSError as exc:
+        logger.warning("failed to write review index for job %s: %s", job_id, exc)
+
+
+def _capture_session_for_job(job_id: str):
+    try:
+        return find_session_for_job(job_id)
+    except OSError as exc:
+        logger.warning("session lookup failed for job %s: %s", job_id, exc)
+        return None
+
+
+def _finalize_job_with_index(
+    job_id: str,
+    req: ReviewRequest,
+    *,
+    status: str,
+    message: str,
+    comment_count: int = 0,
+    session=None,
+) -> None:
+    kwargs: dict[str, object] = {"status": status, "message": message}
+    if session is not None:
+        kwargs["session_id"] = session.session_id
+        kwargs["encoded_repo"] = session.repo_slug
+    _set_job(job_id, **kwargs)
+    _persist_review_index(
+        job_id,
+        req,
+        status=status,
+        message=message,
+        comment_count=comment_count,
+        session=session,
+    )
+
+
 def _run_review_sync(job_id: str, req: ReviewRequest) -> None:
     token = resolve_gitlab_api_token()
     if not token:
         msg = "gitlab.api_token missing in gateway config"
-        _set_job(job_id, status="failed", message=msg)
+        _finalize_job_with_index(job_id, req, status="failed", message=msg)
         _notify_mr(req, f"⚠️ **OpenCodeReview** (gateway): {msg}")
         return
 
@@ -218,13 +292,21 @@ def _run_review_sync(job_id: str, req: ReviewRequest) -> None:
         if proc.returncode != 0:
             stderr_tail = sanitize_git_output(stderr_file.read_text(encoding="utf-8")[-2000:])
             msg = f"ocr review exit {proc.returncode}"
-            _set_job(job_id, status="failed", message=f"{msg}: {stderr_tail[:500]}")
+            session = _capture_session_for_job(job_id)
+            _finalize_job_with_index(
+                job_id,
+                req,
+                status="failed",
+                message=f"{msg}: {stderr_tail[:500]}",
+                session=session,
+            )
             _notify_mr(
                 req,
                 f"⚠️ **OpenCodeReview** (gateway job `{job_id}`): {msg}\n```\n{stderr_tail}\n```",
             )
             return
 
+        session = _capture_session_for_job(job_id)
         _set_job(job_id, message="posting to GitLab MR")
         post_env = os.environ.copy()
         post_env.update(
@@ -247,7 +329,13 @@ def _run_review_sync(job_id: str, req: ReviewRequest) -> None:
         )
         if post_proc.returncode != 0:
             msg = f"post to GitLab failed: {post_proc.stderr[-800:]}"
-            _set_job(job_id, status="failed", message=msg)
+            _finalize_job_with_index(
+                job_id,
+                req,
+                status="failed",
+                message=msg,
+                session=session,
+            )
             _notify_mr(req, f"⚠️ **OpenCodeReview** (gateway job `{job_id}`): {msg}")
             return
 
@@ -257,23 +345,32 @@ def _run_review_sync(job_id: str, req: ReviewRequest) -> None:
         except json.JSONDecodeError:
             pass
         comments = len(summary.get("comments") or [])
-        _set_job(job_id, status="success", message=f"posted review ({comments} comment(s))")
+        success_msg = f"posted review ({comments} comment(s))"
+        _finalize_job_with_index(
+            job_id,
+            req,
+            status="success",
+            message=success_msg,
+            comment_count=comments,
+            session=session,
+        )
         logger.info("job %s success comments=%s", job_id, comments)
     except subprocess.TimeoutExpired as exc:
         msg = f"timeout: {exc}"
-        _set_job(job_id, status="failed", message=msg)
+        session = _capture_session_for_job(job_id)
+        _finalize_job_with_index(job_id, req, status="failed", message=msg, session=session)
         _notify_mr(req, f"⚠️ **OpenCodeReview** (gateway job `{job_id}`): {msg}")
     except subprocess.CalledProcessError as exc:
         msg = _git_error_message(exc)
-        _set_job(job_id, status="failed", message=msg)
+        _finalize_job_with_index(job_id, req, status="failed", message=msg)
         _notify_mr(req, f"⚠️ **OpenCodeReview** (gateway job `{job_id}`): {msg}")
     except ValueError as exc:
         msg = str(exc)
-        _set_job(job_id, status="failed", message=msg)
+        _finalize_job_with_index(job_id, req, status="failed", message=msg)
         _notify_mr(req, f"⚠️ **OpenCodeReview** (gateway job `{job_id}`): {msg}")
     except FileNotFoundError as exc:
         msg = str(exc)
-        _set_job(job_id, status="failed", message=msg)
+        _finalize_job_with_index(job_id, req, status="failed", message=msg)
         _notify_mr(req, f"⚠️ **OpenCodeReview** (gateway job `{job_id}`): {msg}")
     finally:
         _workspace.cleanup_worktree(req.project_id, job_id)
@@ -293,7 +390,16 @@ def enqueue_review(job_id: str, req: ReviewRequest) -> ReviewJob:
     不做：按 project_id+mr_iid 全局去重。
     """
     gw_config.validate_project_id(req.project_id)
-    job = ReviewJob(job_id=job_id, status="queued")
+    job = ReviewJob(
+        job_id=job_id,
+        status="queued",
+        project_id=req.project_id,
+        project_path=req.project_path,
+        mr_iid=req.mr_iid,
+        target_branch=req.target_branch,
+        commit_sha=req.commit_sha,
+        started_at=time.time(),
+    )
     with _jobs_lock:
         _jobs[job_id] = job
     _notify_mr_progress(

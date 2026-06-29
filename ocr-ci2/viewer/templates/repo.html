@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ display_name }} - Severity Dashboard</title>
+    <title>{{ display_name }} - Sessions</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <nav class="breadcrumb">
-    <a href="/">OCR Severity Dashboard</a>
+    <a href="/">OCR Gateway Dashboard</a>
+    <span>/</span>
+    <a href="/repos">Repositories</a>
     <span>/</span>
     <span>{{ display_name }}</span>
 </nav>
@@ -25,37 +27,56 @@
     </div>
 
     {% if sessions %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Session</th>
-                <th>Branch</th>
-                <th class="sev-high">HIGH</th>
-                <th class="sev-medium">MEDIUM</th>
-                <th class="sev-low">LOW</th>
-                <th>Tokens</th>
-                <th>Last Modified</th>
-                <th>链接</th>
-            </tr>
-        </thead>
-        <tbody>
+    <div class="session-list">
         {% for s in sessions %}
-            <tr{% if s.has_high %} class="row-high"{% endif %}>
-                <td><code>{{ s.session_id }}</code></td>
-                <td>{{ s.git_branch or "—" }}</td>
-                <td class="sev-high">{{ s.high }}</td>
-                <td class="sev-medium">{{ s.medium }}</td>
-                <td class="sev-low">{{ s.low }}</td>
-                <td class="tokens" title="{{ s.total_tokens }}">{{ s.total_tokens | format_tokens }}</td>
-                <td>{{ s.last_modified | format_time }}</td>
-                <td class="links">
-                    <a href="{{ s.official_url }}" target="_blank" rel="noopener">官方详情</a>
-                    <a href="{{ s.session_url }}">Severity 摘要</a>
-                </td>
-            </tr>
+        <article class="session-item{% if s.has_high %} session-item-high{% endif %}">
+            <header class="session-item-header">
+                <div class="session-meta">
+                    <a class="session-id" href="{{ s.session_url }}"><code>{{ s.session_id }}</code></a>
+                    <span class="muted">{{ s.git_branch or "—" }}</span>
+                    <span class="muted">{{ s.last_modified | format_time }}</span>
+                </div>
+                <div class="session-stats">
+                    <span class="sev-high" title="HIGH">H {{ s.high }}</span>
+                    <span class="sev-medium" title="MEDIUM">M {{ s.medium }}</span>
+                    <span class="sev-low" title="LOW">L {{ s.low }}</span>
+                    <span class="tokens" title="{{ s.total_tokens }} tokens">{{ s.total_tokens | format_tokens }}</span>
+                    {% if s.files_reviewed is not none %}
+                    <span class="muted">{{ s.files_reviewed }} files</span>
+                    {% endif %}
+                </div>
+                <div class="links">
+                    <a href="{{ s.session_url }}">完整摘要</a>
+                    <a href="{{ s.official_url }}" target="_blank" rel="noopener" title="官方 Viewer（Token 按文件）">:5483</a>
+                </div>
+            </header>
+
+            <div class="session-summary">
+                {% if s.comment_previews %}
+                <ul class="summary-comment-list">
+                    {% for c in s.comment_previews %}
+                    <li class="summary-comment summary-comment-{{ c.level|lower }}">
+                        <span class="badge badge-{{ c.level|lower }}">{{ c.level }}</span>
+                        {% if c.file_path %}
+                        <code class="comment-loc">{{ c.file_path }}{% if c.line %}:{{ c.line }}{% endif %}</code>
+                        {% endif %}
+                        <span class="comment-text">{{ c.snippet }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% if s.comment_more %}
+                <p class="summary-more muted">
+                    还有 {{ s.comment_more }} 条评论 —
+                    <a href="{{ s.session_url }}">查看全部 {{ s.comment_total }} 条</a>
+                </p>
+                {% endif %}
+                {% else %}
+                <p class="muted summary-empty">本 session 未解析到评审评论（可能尚未产生 code_comment，或格式暂不支持）。</p>
+                {% endif %}
+            </div>
+        </article>
         {% endfor %}
-        </tbody>
-    </table>
+    </div>
     {% elif has_any_sessions %}
     <p class="muted">无含 HIGH 的 session（切换「显示全部」查看）。</p>
     {% else %}

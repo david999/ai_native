@@ -16,7 +16,7 @@ AI_PATH_RE = re.compile(r"\.ai[/\\]", re.I)
 
 VIEWER_BASE = os.environ.get("OCR_VIEWER_URL", "http://localhost:5483").rstrip("/")
 SEVERITY_DASHBOARD_BASE = os.environ.get(
-    "SEVERITY_DASHBOARD_URL", "http://localhost:5484"
+    "SEVERITY_DASHBOARD_URL", "http://localhost:8010"
 ).rstrip("/")
 
 

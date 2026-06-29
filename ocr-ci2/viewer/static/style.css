@@ -28,9 +28,10 @@ nav.breadcrumb {
 
 nav.breadcrumb a { color: #0969da; text-decoration: none; }
 nav.breadcrumb a:hover { text-decoration: underline; }
+.nav-links { margin-left: 16px; }
 
 main {
-    max-width: 1100px;
+    max-width: 1280px;
     margin: 0 auto;
     padding: 24px;
 }
@@ -55,6 +56,138 @@ h1 { margin-top: 0; font-size: 1.5rem; }
 }
 
 .btn-warn { border-color: var(--high); color: var(--high); }
+.btn-primary { background: #0969da; color: #fff; border-color: #0969da; }
+
+.kpi-bar {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 16px 0 20px;
+}
+
+.kpi {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 120px;
+}
+
+.kpi-label { display: block; font-size: 0.75rem; color: var(--muted); }
+.kpi-value { font-size: 1.25rem; font-weight: 700; }
+
+.search-form { display: inline-flex; gap: 8px; margin-right: 12px; }
+.search-form input {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-width: 200px;
+}
+
+.status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.status-success { background: #dafbe1; color: #116329; }
+.status-failed { background: #ffebe9; color: var(--high); }
+.status-running, .status-queued { background: #ddf4ff; color: #0969da; }
+
+.row-failed { background: #fff8f6; }
+.row-running { background: #f0f6ff; }
+.row-latest { outline: 2px solid #0969da; outline-offset: -2px; }
+
+.preview-cell { font-size: 0.8rem; max-width: 220px; }
+.preview-item { margin-bottom: 4px; }
+
+.page-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.header-actions { margin-top: 4px; }
+
+.mr-context {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+.meta-grid p { margin: 6px 0; }
+
+.comment-tabs details {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+}
+
+.comment-medium { border-color: #ffe58f; background: #fffbe6; }
+.comment-low { border-color: var(--border); }
+
+.local-sessions { margin-top: 32px; }
+.page-footer { margin-top: 32px; font-size: 0.85rem; }
+
+.table.compact th, .table.compact td { padding: 8px 10px; }
+
+.card-sub { font-size: 0.75rem; margin-top: 6px; }
+.card-sub a { color: #0969da; }
+
+.session-list { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+
+.session-item {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.session-item-high { border-color: #ffc9c2; background: #fffbfb; }
+
+.session-item-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    padding: 12px 16px;
+    background: #f6f8fa;
+    border-bottom: 1px solid var(--border);
+}
+
+.session-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex: 1 1 240px; }
+.session-meta .session-id { font-weight: 600; text-decoration: none; }
+.session-meta .session-id code { background: transparent; padding: 0; }
+
+.session-stats { display: flex; flex-wrap: wrap; gap: 10px; font-size: 0.875rem; font-weight: 600; }
+
+.session-summary { padding: 12px 16px 16px; }
+
+.summary-comment-list { list-style: none; margin: 0; padding: 0; }
+
+.summary-comment {
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 0.875rem;
+    line-height: 1.45;
+}
+
+.summary-comment-high { background: var(--high-bg); border-color: #ffc9c2; }
+.summary-comment-medium { background: #fffbe6; border-color: #ffe58f; }
+.summary-comment-low { background: #fafbfc; }
+
+.badge-high { background: var(--high); color: #fff; }
+.badge-medium { background: var(--medium); color: #fff; }
+.badge-low { background: var(--low); color: #fff; }
+
+.comment-loc { margin: 0 8px 0 4px; font-size: 0.8rem; }
+.comment-text { white-space: pre-wrap; word-break: break-word; }
+
+.summary-more { margin: 4px 0 0; font-size: 0.85rem; }
+.summary-empty { margin: 0; font-size: 0.875rem; }
 
 .table {
     width: 100%;

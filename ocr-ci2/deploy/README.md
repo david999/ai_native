@@ -20,8 +20,9 @@
 | 文件 | 作用 |
 |------|------|
 | [install.ps1](local/install.ps1) | 检查 node/npm/python/git/ocr；pip install Gateway 依赖 |
-| [run.ps1](local/run.ps1) | 加载 `gateway.env`，启动 uvicorn `:8010` |
-| [gateway.env.example](local/gateway.env.example) | 本地 env 模板 |
+| [run.ps1](local/run.ps1) | 加载 `gateway.env`，启动 uvicorn `:8010`（API + Dashboard） |
+| [run_viewer.ps1](local/run_viewer.ps1) | **已废弃** — 转发到 `run.ps1` |
+| [gateway.env.example](local/gateway.env.example) | 本地 env 模板（含 Dashboard / `OCR_VIEWER_URL`） |
 
 使用：复制 `gateway.env.example` → `gateway.env`，再执行 `run.ps1`。
 

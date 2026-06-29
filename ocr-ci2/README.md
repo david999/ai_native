@@ -17,6 +17,7 @@ MR Pipeline
         workspace 缓存 fetch → ocr review → post_ocr_to_gitlab.py
               ↓
      GitLab MR 行内评论
+     Dashboard（同 :8010 `/`）← review-index + session JSONL
 ```
 
 ## 快速开始（本地，仅原生）
@@ -29,6 +30,8 @@ cd ocr-ci2
 Copy-Item deploy\local\gateway.env.example deploy\local\gateway.env
 .\deploy\local\run.ps1
 curl http://localhost:8010/health
+# Dashboard: http://localhost:8010/  （MR 评审流）
+# 可选官方 Viewer: ocr viewer  → http://localhost:5483
 
 # 3. 业务仓 CI：复制 deploy/prod/ci/snippet.native-host.yml → 业务仓库 .gitlab-ci.yml
 # GitLab Variables: OCR_GATEWAY_SECRET=local-dev-secret
@@ -46,7 +49,7 @@ curl http://localhost:8010/health
 
 | 文件 | 作用 |
 |------|------|
-| [main.py](gateway/main.py) | FastAPI：`/health`、`POST /v1/review/merge-request`、`GET /v1/jobs/{id}` |
+| [main.py](gateway/main.py) | FastAPI：API（`/health`、`/v1/*`）+ Dashboard UI（`/`、`/repos`、`/mr/*`、`/r/*`） |
 | [review_service.py](gateway/review_service.py) | git fetch、`ocr review`、发帖、可选 MR note |
 | [workspace_cache.py](gateway/workspace_cache.py) | bare mirror + worktree 缓存 |
 | [config.py](gateway/config.py) | 环境变量与默认路径 |
@@ -58,18 +61,19 @@ curl http://localhost:8010/health
 |------|------|
 | [post_ocr_to_gitlab.py](scripts/post_ocr_to_gitlab.py) | OCR JSON → GitLab MR 评论 |
 | [gitlab_mr.py](scripts/gitlab_mr.py) | GitLab MR API 工具（含 `[HIGH]`/`[MEDIUM]`/`[LOW]` 着色） |
-| [session_telemetry.py](scripts/session_telemetry.py) | 扫描 JSONL severity 统计 |
+| [session_telemetry.py](scripts/session_telemetry.py) | 扫描 JSONL severity / token 统计 |
+| [review_index.py](scripts/review_index.py) | Gateway MR 评审索引（`review-index.jsonl`） |
+| [session_job_link.py](scripts/session_job_link.py) | job_id → session JSONL 关联 |
 | [ocr_ci_config.py](scripts/ocr_ci_config.py) | 读取 `config.json` / 环境变量 |
-| [acceptance/bake_ocr_config.py](scripts/acceptance/bake_ocr_config.py) | Docker 构建 bake 配置 |
 
-### `viewer/` — Severity Dashboard（:5484）
+### `viewer/` — Dashboard UI（并入 Gateway :8010）
 
 | 文件 | 作用 |
 |------|------|
-| [app.py](viewer/app.py) | FastAPI 首页 / repo / session 摘要 |
-| [deploy/local/run_viewer.ps1](deploy/local/run_viewer.ps1) | 本地启动脚本 |
+| [routes.py](viewer/routes.py) | MR 评审流首页、repo/session 页、模板 |
+| [app.py](viewer/app.py) | 已废弃独立 :5484 启动；请用 `deploy/local/run.ps1` |
 
-与官方 `ocr viewer`（:5483）读同一 JSONL；**不修改** open-code-review 源码。
+与官方 `ocr viewer`（:5483）读同一 JSONL；Dashboard 内保留跳转 :5483（FileTokenBreakdown）。
 
 ### `config/` — 配置模板
 

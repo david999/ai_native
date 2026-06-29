@@ -1,6 +1,6 @@
 """Scan OCR session JSONL for severity and token telemetry (~/.opencodereview/sessions).
 
-Used by the Severity Dashboard (:5484) and ``session_token_report.py``.
+Used by the OCR Gateway Dashboard (:8010) and ``session_token_report.py``.
 Severity rules align with E2E lib/ocr_session.py: only ``type=tool_call`` +
 ``tool_name=code_comment`` arguments are counted.
 
@@ -121,6 +121,7 @@ class SessionTelemetry:
     jsonl_path: str = ""
     severity: SeverityCounts = field(default_factory=SeverityCounts)
     high_comments: list[SeverityComment] = field(default_factory=list)
+    all_comments: list[SeverityComment] = field(default_factory=list)
     tokens: TokenUsage = field(default_factory=TokenUsage)
     files_reviewed: int | None = None
     duration_seconds: float | None = None
@@ -147,10 +148,15 @@ class RepoTelemetry:
     severity: SeverityCounts = field(default_factory=SeverityCounts)
     tokens: TokenUsage = field(default_factory=TokenUsage)
     latest_tokens: TokenUsage = field(default_factory=TokenUsage)
+    latest_severity: SeverityCounts = field(default_factory=SeverityCounts)
 
     @property
     def has_high(self) -> bool:
         return self.severity.high > 0
+
+    @property
+    def latest_has_high(self) -> bool:
+        return self.latest_severity.high > 0
 
 
 def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
@@ -165,18 +171,131 @@ def _parse_tool_arguments(raw: Any) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _comment_text_from_tool_call(obj: dict[str, Any]) -> str:
-    if obj.get("type") != "tool_call" or obj.get("tool_name") != "code_comment":
-        return ""
+def _tool_call_arguments_dict(obj: dict[str, Any]) -> dict[str, Any]:
     args = obj.get("arguments")
     if isinstance(args, dict):
-        return str(args.get("content") or args.get("comment") or "")
-    if isinstance(args, str):
-        parsed = _parse_tool_arguments(args)
-        if parsed:
-            return str(parsed.get("content") or parsed.get("comment") or args)
         return args
-    return ""
+    if isinstance(args, str):
+        return _parse_tool_arguments(args)
+    return {}
+
+
+def _parse_comments_field(raw: Any) -> list[dict[str, Any]]:
+    """Parse OCR ``comments`` payload (list, JSON string, or single dict)."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        raw = parsed
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return [entry for entry in raw if isinstance(entry, dict)]
+    return []
+
+
+def _line_from_mapping(data: dict[str, Any]) -> int:
+    for key in ("line", "end_line", "start_line"):
+        if data.get(key) is not None:
+            try:
+                return int(data[key])
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _path_from_mapping(data: dict[str, Any]) -> str:
+    return str(
+        data.get("path")
+        or data.get("file_path")
+        or data.get("filePath")
+        or data.get("filepath")
+        or ""
+    )
+
+
+def _text_from_mapping(data: dict[str, Any]) -> str:
+    return str(
+        data.get("content")
+        or data.get("comment")
+        or data.get("body")
+        or data.get("message")
+        or ""
+    ).strip()
+
+
+def iter_code_comment_entries(obj: dict[str, Any]) -> list[tuple[str, str, int]]:
+    """Expand one ``code_comment`` tool_call into (text, file_path, line) rows."""
+    if obj.get("type") != "tool_call" or obj.get("tool_name") != "code_comment":
+        return []
+
+    parsed = _tool_call_arguments_dict(obj)
+    entries: list[tuple[str, str, int]] = []
+
+    parent_path = str(
+        obj.get("filePath") or obj.get("file_path") or _path_from_mapping(parsed)
+    )
+
+    if "comments" in parsed:
+        for item in _parse_comments_field(parsed.get("comments")):
+            text = _text_from_mapping(item)
+            if not text:
+                continue
+            file_path = _path_from_mapping(item) or parent_path
+            entries.append(
+                (
+                    text,
+                    file_path,
+                    _line_from_mapping(item),
+                )
+            )
+        if entries:
+            return entries
+
+    text = _text_from_mapping(parsed)
+    if not text and isinstance(obj.get("arguments"), str):
+        raw = str(obj.get("arguments") or "").strip()
+        if raw and not parsed:
+            text = raw
+    if not text:
+        return []
+
+    file_path = parent_path or _path_from_mapping(parsed)
+    return [(text, file_path, _line_from_mapping(parsed))]
+
+
+def _comment_text_from_tool_call(obj: dict[str, Any]) -> str:
+    parts = [text for text, _, _ in iter_code_comment_entries(obj) if text]
+    return "\n".join(parts)
+
+
+def _severity_comment_from_parts(text: str, file_path: str, line_no: int) -> SeverityComment | None:
+    if not text.strip():
+        return None
+    level = _first_severity_level(text) or "LOW"
+    snippet = text.strip()
+    if len(snippet) > 240:
+        snippet = snippet[:237] + "..."
+    return SeverityComment(
+        file_path=file_path,
+        line=line_no,
+        snippet=snippet,
+        level=level,
+    )
+
+
+def _extract_comment_from_tool_call(obj: dict[str, Any]) -> SeverityComment | None:
+    for text, file_path, line_no in iter_code_comment_entries(obj):
+        comment = _severity_comment_from_parts(text, file_path, line_no)
+        if comment:
+            return comment
+    return None
 
 
 def count_severities_in_text(text: str) -> dict[str, int]:
@@ -251,6 +370,7 @@ def scan_session_jsonl(path: Path) -> SessionTelemetry:
     timestamp: datetime | None = None
     severity = SeverityCounts()
     high_comments: list[SeverityComment] = []
+    all_comments: list[SeverityComment] = []
     tokens = TokenUsage()
     files_reviewed: int | None = None
     duration_seconds: float | None = None
@@ -309,43 +429,15 @@ def scan_session_jsonl(path: Path) -> SessionTelemetry:
             if tool_name != "code_comment":
                 continue
 
-            text = _comment_text_from_tool_call(obj)
-            if not text:
-                continue
-
-            level_counts = count_severities_in_text(text)
-            severity.add_counts(level_counts)
-
-            level = _first_severity_level(text)
-            if level == "HIGH":
-                args = obj.get("arguments")
-                parsed = _parse_tool_arguments(args if not isinstance(args, dict) else args)
-                file_path = str(
-                    obj.get("filePath")
-                    or obj.get("file_path")
-                    or parsed.get("path")
-                    or parsed.get("file_path")
-                    or ""
-                )
-                line_no = 0
-                for key in ("line", "end_line", "start_line"):
-                    if parsed.get(key):
-                        try:
-                            line_no = int(parsed[key])
-                            break
-                        except (TypeError, ValueError):
-                            pass
-                snippet = text.strip()
-                if len(snippet) > 240:
-                    snippet = snippet[:237] + "..."
-                high_comments.append(
-                    SeverityComment(
-                        file_path=file_path,
-                        line=line_no,
-                        snippet=snippet,
-                        level=level,
-                    )
-                )
+            for text, file_path, line_no in iter_code_comment_entries(obj):
+                level_counts = count_severities_in_text(text)
+                severity.add_counts(level_counts)
+                comment = _severity_comment_from_parts(text, file_path, line_no)
+                if not comment:
+                    continue
+                all_comments.append(comment)
+                if comment.level == "HIGH":
+                    high_comments.append(comment)
 
     return SessionTelemetry(
         session_id=session_id,
@@ -357,6 +449,7 @@ def scan_session_jsonl(path: Path) -> SessionTelemetry:
         jsonl_path=str(path),
         severity=severity,
         high_comments=high_comments,
+        all_comments=all_comments,
         tokens=tokens,
         files_reviewed=files_reviewed,
         duration_seconds=duration_seconds,
@@ -448,6 +541,7 @@ def discover_repos(root: Path | None = None) -> list[RepoTelemetry]:
                 severity=severity,
                 tokens=repo_tokens,
                 latest_tokens=sessions[0].tokens if sessions else TokenUsage(),
+                latest_severity=sessions[0].severity if sessions else SeverityCounts(),
             )
         )
 

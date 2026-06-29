@@ -12,7 +12,8 @@
 # - 不做：校验 ocr 是否在 PATH；校验 GitLab 可达；后台守护进程
 
 param(
-    [string]$EnvFile = ""
+    [string]$EnvFile = "",
+    [switch]$Restart
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,8 +58,67 @@ if (-not $env:OCR_GATEWAY_WORK_ROOT) {
 }
 
 $port = if ($env:OCR_GATEWAY_PORT) { $env:OCR_GATEWAY_PORT } else { "8010" }
+
+function Get-ListenPidForPort([int]$ListenPort) {
+    try {
+        $conn = Get-NetTCPConnection -LocalPort $ListenPort -State Listen -ErrorAction Stop |
+            Select-Object -First 1
+        if ($conn) { return [int]$conn.OwningProcess }
+    } catch {
+        # NetTCPIP module may be unavailable; fall back to netstat.
+        $line = netstat -ano | Select-String ":\s*$ListenPort\s" | Select-String "LISTENING" | Select-Object -First 1
+        if ($line -match '\s+(\d+)\s*$') { return [int]$matches[1] }
+    }
+    return $null
+}
+
+$existingPid = Get-ListenPidForPort ([int]$port)
+if ($existingPid) {
+    $healthUrl = "http://127.0.0.1:${port}/health"
+    $alreadyRunning = $false
+    try {
+        $resp = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 3 -UseBasicParsing
+        if ($resp.StatusCode -eq 200 -and $resp.Content -match '"service"\s*:\s*"ocr-gateway"') {
+            $alreadyRunning = $true
+        }
+    } catch {
+        $alreadyRunning = $false
+    }
+
+    if ($alreadyRunning -and -not $Restart) {
+        Write-Host "OCR Gateway already running on port ${port}."
+        Write-Host "Dashboard: http://localhost:${port}/"
+        Write-Host "Health:    http://localhost:${port}/health"
+        Write-Host "Re-run with -Restart to reload code after changes."
+        exit 0
+    }
+
+    if ($alreadyRunning -and $Restart) {
+        Write-Host "Restarting OCR Gateway on port ${port} (stopping PID ${existingPid})..."
+        Stop-Process -Id $existingPid -Force -ErrorAction Stop
+        Start-Sleep -Seconds 1
+    }
+
+    $procName = (Get-Process -Id $existingPid -ErrorAction SilentlyContinue).ProcessName
+    if (-not $procName) { $procName = "unknown" }
+    Write-Error @"
+Port ${port} is in use by PID ${existingPid} (${procName}), but it is not a healthy OCR Gateway (health check failed).
+Stop the stale process, then re-run this script:
+  Stop-Process -Id ${existingPid} -Force
+Or use another port in deploy\local\gateway.env:
+  OCR_GATEWAY_PORT=8012
+"@
+}
+
+python -c "import jinja2" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Python package 'jinja2' is missing (Dashboard needs it). Run: .\deploy\local\install.ps1"
+}
+
 Write-Host "Starting OCR Gateway on http://0.0.0.0:${port} (Ctrl+C to stop)"
 Write-Host "Health: http://localhost:${port}/health"
+Write-Host "Dashboard (MR reviews): http://localhost:${port}/"
+Write-Host "Official OCR Viewer (optional): ocr viewer -> http://localhost:5483"
 Write-Host "CI should use OCR_GATEWAY_URL=http://host.docker.internal:${port}"
 
 Push-Location $Root

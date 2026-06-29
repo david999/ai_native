@@ -75,6 +75,95 @@ def test_scan_session_jsonl_code_comment_only(tmp_path: Path):
     assert result.high_comments[0].line == 42
 
 
+def test_scan_session_jsonl_ocr_comments_batch(tmp_path: Path):
+    """OCR 1.6.x code_comment uses arguments.comments JSON array."""
+    repo = tmp_path / "my-repo"
+    jsonl = repo / "sess-batch.jsonl"
+    _write_jsonl(
+        jsonl,
+        [
+            {"type": "session_start", "sessionId": "sess-batch", "cwd": "/work/proj"},
+            {
+                "type": "tool_call",
+                "tool_name": "code_comment",
+                "arguments": json.dumps(
+                    {
+                        "comments": json.dumps(
+                            [
+                                {
+                                    "path": "src/Calc.java",
+                                    "end_line": 10,
+                                    "content": "[HIGH] Possible NPE when entity is null",
+                                },
+                                {"content": "[MEDIUM] Extract helper method"},
+                            ]
+                        )
+                    }
+                ),
+            },
+        ],
+    )
+
+    result = scan_session_jsonl(jsonl)
+    assert result.severity.high == 1
+    assert result.severity.medium == 1
+    assert len(result.all_comments) == 2
+    assert result.all_comments[0].file_path == "src/Calc.java"
+    assert "NPE" in result.all_comments[0].snippet
+
+
+def test_scan_session_jsonl_ocr165_native_comments_array(tmp_path: Path):
+    """OCR 1.6.5: comments is a JSON array; filePath lives on the tool_call row."""
+    repo = tmp_path / "datacalc-web"
+    jsonl = repo / "sess165.jsonl"
+    java_path = (
+        "src/main/java/com/example/SingleChargeListServiceImpl.java"
+    )
+    _write_jsonl(
+        jsonl,
+        [
+            {"type": "session_start", "sessionId": "sess165", "cwd": "/work/datacalc-web"},
+            {
+                "type": "tool_call",
+                "tool_name": "code_comment",
+                "filePath": java_path,
+                "arguments": json.dumps(
+                    {
+                        "comments": [
+                            {
+                                "content": "NPE 风险：Optional.ofNullable(...).orElse(null) 在 selectById 返回 null 时不安全",
+                                "existing_code": "row.orElse(null)",
+                                "suggestion_code": "row.orElseThrow(...)",
+                            }
+                        ]
+                    }
+                ),
+            },
+            {
+                "type": "tool_call",
+                "tool_name": "code_comment",
+                "filePath": java_path,
+                "arguments": json.dumps(
+                    {
+                        "comments": [
+                            {"content": "[HIGH] SQL injection risk in mapper"},
+                            {"content": "[MEDIUM] Extract validation helper"},
+                        ]
+                    }
+                ),
+            },
+        ],
+    )
+
+    result = scan_session_jsonl(jsonl)
+    assert len(result.all_comments) == 3
+    assert result.all_comments[0].file_path == java_path
+    assert "NPE" in result.all_comments[0].snippet
+    assert result.all_comments[0].level == "LOW"
+    assert result.severity.high == 1
+    assert result.severity.medium == 1
+
+
 def test_discover_repos_and_list_sessions(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("OCR_SESSIONS_DIR", str(tmp_path))
 

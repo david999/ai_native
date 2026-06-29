@@ -1,10 +1,10 @@
-# Severity Dashboard — 本地开发（Windows）
+# DEPRECATED — Severity Dashboard 已并入 OCR Gateway :8010
 #
-# 用法：
-#   copy deploy\local\viewer.env.example deploy\local\viewer.env
-#   .\deploy\local\run_viewer.ps1
+# 请改用：
+#   .\deploy\local\run.ps1
+#   浏览器 http://localhost:8010/
 #
-# 需同时运行官方 viewer（可选，用于「官方详情」链接）：
+# 官方 OCR Viewer（可选）：
 #   ocr viewer   # :5483
 
 param(
@@ -14,31 +14,8 @@ param(
 $ErrorActionPreference = "Stop"
 $DeployLocal = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Root = Split-Path -Parent (Split-Path -Parent $DeployLocal)
-if (-not $EnvFile) {
-    $EnvFile = Join-Path $DeployLocal "viewer.env"
-}
 
-if (Test-Path $EnvFile) {
-    Write-Host "Loading env from $EnvFile"
-    Get-Content $EnvFile | ForEach-Object {
-        $line = $_.Trim()
-        if (-not $line -or $line.StartsWith("#")) { return }
-        if ($line -match '^\s*([^#=]+)=(.*)$') {
-            $name = $matches[1].Trim()
-            $value = $matches[2].Trim().Trim('"').Trim("'")
-            [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        }
-    }
-} else {
-    Write-Warning "No $EnvFile — using defaults (see deploy\local\viewer.env.example)"
-}
+Write-Warning "run_viewer.ps1 is deprecated. Dashboard is now at http://localhost:8010/ (use deploy\local\run.ps1)."
+Write-Host "Forwarding to deploy\local\run.ps1 ..."
 
-$env:PYTHONPATH = $Root
-$port = if ($env:SEVERITY_VIEWER_PORT) { $env:SEVERITY_VIEWER_PORT } else { "5484" }
-$hostName = if ($env:SEVERITY_VIEWER_HOST) { $env:SEVERITY_VIEWER_HOST } else { "127.0.0.1" }
-
-Write-Host "Starting Severity Dashboard on http://localhost:${port} (Ctrl+C to stop)"
-Write-Host "Official OCR Viewer (optional): ocr viewer -> http://localhost:5483"
-
-Set-Location $Root
-python -m viewer.app --host $hostName --port $port
+& (Join-Path $DeployLocal "run.ps1") @PSBoundParameters

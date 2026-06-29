@@ -82,7 +82,7 @@ datacalc-web 的 [`.opencodereview/rule.json`](../../datacalc-web/.opencoderevie
 |------|------|------|
 | `OCR_SESSIONS_DIR` | `~/.opencodereview/sessions` | session JSONL 根目录 |
 | `OCR_VIEWER_URL` | `http://localhost:5483` | 报告中的官方 Viewer 链接前缀 |
-| `SEVERITY_DASHBOARD_URL` | `http://localhost:5484` | 报告中的 Severity Dashboard 链接前缀 |
+| `SEVERITY_DASHBOARD_URL` | `http://localhost:8010` | 报告中的 Gateway Dashboard 链接前缀 |
 
 ## 产物
 

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>!{{ mr_iid }} - {{ project_path }}</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<nav class="breadcrumb">
+    <a href="/">OCR Gateway Dashboard</a>
+    <span>/</span>
+    <span>{{ project_path }} !{{ mr_iid }}</span>
+</nav>
+<main>
+    <h1>{{ project_path }} <a href="{{ mr_url }}" target="_blank" rel="noopener">!{{ mr_iid }}</a></h1>
+    <p class="hint">该 MR 的全部 Gateway 评审历史（最新一条高亮）</p>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th>时间</th>
+                <th>状态</th>
+                <th>Commit</th>
+                <th class="sev-high">HIGH</th>
+                <th class="sev-medium">MED</th>
+                <th class="sev-low">LOW</th>
+                <th>评论</th>
+                <th>Tokens</th>
+                <th>Job</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for r in reviews %}
+            <tr{% if r.is_latest %} class="row-latest"{% elif r.has_high %} class="row-high"{% elif r.status == 'failed' %} class="row-failed"{% endif %}>
+                <td>{{ r.finished_at | format_time }}</td>
+                <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
+                <td><code>{{ r.commit_short }}</code></td>
+                <td class="sev-high">{{ r.high }}</td>
+                <td class="sev-medium">{{ r.medium }}</td>
+                <td class="sev-low">{{ r.low }}</td>
+                <td>{{ r.comment_count }}</td>
+                <td>{{ r.total_tokens_fmt }}</td>
+                <td><code>{{ r.job_id }}</code></td>
+                <td class="links">
+                    {% if r.session_url %}
+                    <a href="{{ r.session_url }}">Session</a>
+                    <a href="{{ r.official_url }}" target="_blank" rel="noopener">官方 Viewer</a>
+                    {% else %}
+                    <span class="muted">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <footer class="page-footer muted">
+        <a href="/">← 返回 MR 评审流</a>
+    </footer>
+</main>
+</body>
+</html>

@@ -3,22 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ session.session_id }} - Severity Summary</title>
+    <title>{{ session.session_id }} - Session</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <nav class="breadcrumb">
-    <a href="/">OCR Severity Dashboard</a>
+    <a href="/">OCR Gateway Dashboard</a>
     <span>/</span>
     <a href="{{ repo_url }}">{{ display_name }}</a>
     <span>/</span>
     <span>{{ session.session_id }}</span>
 </nav>
 <main>
-    <h1>Session {{ session.session_id }}</h1>
-    <p class="hint">
-        <a href="{{ official_url }}" target="_blank" rel="noopener">官方详情 → {{ official_url }}</a>
-    </p>
+    <div class="page-header">
+        <h1>Session {{ session.session_id }}</h1>
+        <div class="header-actions">
+            <a class="btn btn-primary" href="{{ official_url }}" target="_blank" rel="noopener">官方详情（Token 按文件）→</a>
+        </div>
+    </div>
+
+    {% if mr_record %}
+    <section class="mr-context">
+        <strong>MR 上下文：</strong>
+        <a href="{{ mr_record.gitlab_mr_url }}" target="_blank" rel="noopener">{{ mr_record.project_path }} !{{ mr_record.mr_iid }}</a>
+        · commit <code>{{ mr_record.commit_sha[:8] }}</code>
+        · job <code>{{ mr_record.job_id }}</code>
+    </section>
+    {% endif %}
 
     <section class="summary-cards">
         <div class="card sev-high">
@@ -41,31 +52,48 @@
                 completion {{ session.tokens.completion_tokens | format_tokens }} /
                 {{ session.tokens.request_count }} LLM
             </div>
+            <div class="card-sub muted">按文件 breakdown 见 <a href="{{ official_url }}" target="_blank" rel="noopener">官方 Viewer</a></div>
         </div>
     </section>
 
-    {% if session.cwd %}
-    <p><strong>CWD:</strong> <code>{{ session.cwd }}</code></p>
-    {% endif %}
-    {% if session.git_branch %}
-    <p><strong>Branch:</strong> {{ session.git_branch }}</p>
-    {% endif %}
+    <section class="meta-grid">
+        {% if session.cwd %}<p><strong>CWD:</strong> <code>{{ session.cwd }}</code></p>{% endif %}
+        {% if session.git_branch %}<p><strong>Branch:</strong> {{ session.git_branch }}</p>{% endif %}
+        {% if session.files_reviewed is not none %}<p><strong>Files reviewed:</strong> {{ session.files_reviewed }}</p>{% endif %}
+        {% if session.duration_seconds is not none %}<p><strong>Duration:</strong> {{ "%.1f"|format(session.duration_seconds) }}s</p>{% endif %}
+        {% if session.llm_failures %}<p><strong>LLM failures:</strong> {{ session.llm_failures }}</p>{% endif %}
+        {% if session.tool_counts %}
+        <p><strong>Tools:</strong>
+            {% for name, count in session.tool_counts.items() %}
+            <code>{{ name }}</code>×{{ count }}{% if not loop.last %}, {% endif %}
+            {% endfor %}
+        </p>
+        {% endif %}
+    </section>
 
-    <h2>HIGH 评论片段</h2>
-    {% if high_comments %}
-    <ul class="comment-list">
-        {% for c in high_comments %}
-        <li class="comment-high">
-            {% if c.file_path %}
-            <div class="comment-meta"><code>{{ c.file_path }}</code>{% if c.line %} L{{ c.line }}{% endif %}</div>
+    <h2>评论</h2>
+    <div class="comment-tabs">
+        {% for level, label in [("HIGH", "HIGH"), ("MEDIUM", "MEDIUM"), ("LOW", "LOW")] %}
+        {% set items = comments_by_level[level] %}
+        <details{% if level == "HIGH" and items %} open{% endif %}>
+            <summary class="sev-{{ level|lower }}">{{ label }} ({{ items|length }})</summary>
+            {% if items %}
+            <ul class="comment-list">
+                {% for c in items %}
+                <li class="comment-{{ c.level|lower }}">
+                    {% if c.file_path %}
+                    <div class="comment-meta"><code>{{ c.file_path }}</code>{% if c.line %} L{{ c.line }}{% endif %}</div>
+                    {% endif %}
+                    <pre class="comment-snippet">{{ c.snippet }}</pre>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="muted">无 {{ label }} 评论。</p>
             {% endif %}
-            <pre class="comment-snippet">{{ c.snippet }}</pre>
-        </li>
+        </details>
         {% endfor %}
-    </ul>
-    {% else %}
-    <p class="muted">本 session 无带 [HIGH] 前缀的 code_comment。</p>
-    {% endif %}
+    </div>
 </main>
 </body>
 </html>
