@@ -1,0 +1,30 @@
+# services: OCR Gateway only (GitLab runs elsewhere, e.g. https://gitlab.aulton.com).
+# Copy gateway.env.example values into environment or use env_file.
+# CI: OCR_GATEWAY_URL=http://<this-host-IP>:8010
+
+services:
+  ocr-gateway:
+    image: ocr-gateway:prod
+    build:
+      context: ../../..
+      dockerfile: deploy/prod/docker/Dockerfile
+    container_name: ocr-gateway
+    ports:
+      - "8010:8010"
+    volumes:
+      - ocr-gateway-work:/var/ocr-gateway/work
+      # 可选：持久化 session JSONL，便于 Dashboard / 排障
+      # - ocr-gateway-sessions:/root/.opencodereview/sessions
+    environment:
+      OCR_GATEWAY_SECRET: change-me-in-production
+      OCR_GATEWAY_GITLAB_URL: https://gitlab.aulton.com
+      OCR_GATEWAY_GITLAB_API_URL: https://gitlab.aulton.com
+      OCR_GATEWAY_GITLAB_PUBLIC_URL: https://gitlab.aulton.com
+      OCR_GATEWAY_WORK_ROOT: /var/ocr-gateway/work
+      OCR_GATEWAY_MAX_CONCURRENT: "2"
+      OCR_REVIEW_CONCURRENCY: "4"
+    restart: unless-stopped
+
+volumes:
+  ocr-gateway-work:
+  # ocr-gateway-sessions:

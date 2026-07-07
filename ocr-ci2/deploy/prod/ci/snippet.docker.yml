@@ -4,9 +4,10 @@
 #   deploy/prod/docker/build_image.ps1 && deploy/prod/docker/run.ps1
 #   Gateway and Runner on gitlab_default network
 #
-# GitLab Variables:
+# GitLab CI/CD Variables（群组 / 实例 / 项目，勿写进本文件）:
 #   OCR_GATEWAY_URL=http://ocr-gateway:8010
-#   OCR_GATEWAY_SECRET=<same as compose>
+#   OCR_GATEWAY_SECRET=<与 compose 相同>
+# 可选：OCR_GATEWAY_WAIT=1 时 Job 轮询 Gateway 直至 success/failed
 
 stages:
   - review
@@ -21,7 +22,6 @@ code-review:
   allow_failure: true
   variables:
     GIT_DEPTH: "0"
-    OCR_GATEWAY_URL: "http://ocr-gateway:8010"
   script:
     - |
       set -e

@@ -3,3 +3,4 @@
 deploy/local/gateway.env
 deploy/prod/native/gateway.env
 deploy/prod/docker/gateway.env
+deploy/prod/docker/prod.config.json

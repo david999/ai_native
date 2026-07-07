@@ -1,0 +1,16 @@
+{
+  "llm": {
+    "url": "https://llm-737grc144onfmho6.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "auth_token": "<LLM_API_KEY>",
+    "model": "glm-5.2",
+    "use_anthropic": false,
+    "extra_body": {
+      "thinking": {
+        "type": "disabled"
+      }
+    }
+  },
+  "gitlab": {
+    "api_token": "<BOT_PAT>"
+  }
+}

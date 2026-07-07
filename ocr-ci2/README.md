@@ -41,7 +41,9 @@ curl http://localhost:8010/health
 
 ## 生产部署
 
-默认 **Linux 原生**（systemd）；可选 **Docker**。完整步骤（GitLab 账号/Runner/OCR/Gateway/试点项目/域名说明）见 [docs/生产部署指南.md](docs/生产部署指南.md) 与 [deploy/README.md](deploy/README.md)。
+**Docker**（推荐）：单镜像含 OCR CLI + Gateway。  
+- **逐步操作**：[docs/生产环境部署操作指南.md](docs/生产环境部署操作指南.md)  
+- **概念与网络**：[docs/生产部署指南.md](docs/生产部署指南.md)
 
 ## 文件说明
 

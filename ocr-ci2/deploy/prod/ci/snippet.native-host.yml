@@ -3,9 +3,10 @@
 # 端口：OCR_GATEWAY_URL 使用 :8010（Gateway），不是 :8000（GitLab）
 # 本地前置：deploy/local/run.ps1；GitLab 在 :8000
 #
-# GitLab Variables:
-#   OCR_GATEWAY_SECRET=<与 deploy/local/gateway.env 相同>
-#   OCR_GATEWAY_URL=http://host.docker.internal:8010
+# GitLab CI/CD Variables（群组 / 实例 / 项目，勿写进本文件）:
+#   OCR_GATEWAY_SECRET=<与 gateway.env / compose 相同>
+#   OCR_GATEWAY_URL=http://host.docker.internal:8010  （本地 Windows；Linux 用宿主机 IP）
+# 可选：OCR_GATEWAY_WAIT=1 时 Job 轮询 Gateway 直至 success/failed
 
 stages:
   - review
@@ -20,7 +21,6 @@ code-review:
   allow_failure: true
   variables:
     GIT_DEPTH: "0"
-    OCR_GATEWAY_URL: "http://host.docker.internal:8010"
   script:
     - |
       set -e
