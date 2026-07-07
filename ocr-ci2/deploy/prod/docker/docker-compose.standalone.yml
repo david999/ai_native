@@ -1,6 +1,11 @@
-# services: OCR Gateway only (GitLab runs elsewhere, e.g. https://gitlab.aulton.com).
-# Copy gateway.env.example values into environment or use env_file.
-# CI: OCR_GATEWAY_URL=http://<this-host-IP>:8010
+# OCR Gateway only（GitLab 独立部署，如 https://gitlab.aulton.com）。
+#
+# Aulton 生产（宿主机 172.16.5.119）：
+#   宿主机端口 48010 → 容器内 8010（镜像内 uvicorn 固定监听 8010）
+#   CI Variable OCR_GATEWAY_URL=http://172.16.5.119:48010
+#   Dashboard：http://172.16.5.119:48010/
+#
+# 运维验收：curl -s http://127.0.0.1:48010/health
 
 services:
   ocr-gateway:
@@ -10,7 +15,8 @@ services:
       dockerfile: deploy/prod/docker/Dockerfile
     container_name: ocr-gateway
     ports:
-      - "8010:8010"
+      # 宿主机:容器 — 生产对外 48010，容器内仍为 8010
+      - "48010:8010"
     volumes:
       - ocr-gateway-work:/var/ocr-gateway/work
       # 可选：持久化 session JSONL，便于 Dashboard / 排障
