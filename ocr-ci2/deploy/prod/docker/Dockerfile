@@ -12,6 +12,11 @@ FROM docker.1ms.run/library/node:20
 
 ARG OCR_NPM_VERSION=@alibaba-group/open-code-review
 
+# 官方 node 镜像无 Python/pip；Gateway 需 uvicorn，ocr review 需 git
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm install -g "${OCR_NPM_VERSION}" \
     && ocr version || true
 
@@ -27,6 +32,7 @@ RUN pip3 install --break-system-packages --no-cache-dir -r /tmp/gateway-requirem
 
 COPY gateway /app/gateway
 COPY scripts /app/scripts
+COPY viewer /app/viewer
 WORKDIR /app
 ENV PYTHONPATH=/app
 ENV OCR_POST_SCRIPT=/usr/local/lib/ocr-ci/post_ocr_to_gitlab.py

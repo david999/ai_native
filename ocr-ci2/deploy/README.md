@@ -54,7 +54,7 @@
 | [run.ps1](prod/docker/run.ps1) | compose up（默认 `docker-compose.yml`） |
 | [gateway.env.example](prod/docker/gateway.env.example) | compose 环境变量说明 |
 
-操作步骤见 [docs/生产环境部署操作指南.md](../docs/生产环境部署操作指南.md)。改 OCR 配置后需重新 `build_image.ps1` 并 recreate 容器。
+操作步骤见 [docs/生产环境运维部署手册.md](../docs/生产环境运维部署手册.md)（运维）或 [docs/生产环境部署操作指南.md](../docs/生产环境部署操作指南.md)（开发/全流程）。改 OCR 配置后需重新 `build_image.ps1` 并 recreate 容器。
 
 ---
 

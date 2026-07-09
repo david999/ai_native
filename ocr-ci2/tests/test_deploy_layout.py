@@ -31,3 +31,9 @@ DEPLOY_FILES = [
 def test_deploy_layout_key_files_exist():
     missing = [rel for rel in DEPLOY_FILES if not (REPO_ROOT / rel).is_file()]
     assert not missing, f"missing deploy files: {missing}"
+
+
+def test_prod_dockerfile_includes_viewer_for_dashboard():
+    """Gateway 镜像须包含 viewer/，否则 uvicorn 启动报 No module named 'viewer'。"""
+    dockerfile = (REPO_ROOT / "deploy/prod/docker/Dockerfile").read_text(encoding="utf-8")
+    assert "COPY viewer /app/viewer" in dockerfile

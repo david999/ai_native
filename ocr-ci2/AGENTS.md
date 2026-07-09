@@ -16,7 +16,7 @@
 |----------|----------|
 | `gateway/*` | `docs/架构说明.md`、`docs/本地部署指南.md`、`docs/生产部署指南.md` |
 | `deploy/local/*`、`deploy/prod/ci/snippet.native-host.yml` | `docs/本地部署指南.md` |
-| `deploy/prod/native/*`、`deploy/prod/docker/*`、`snippet.docker.yml` | `docs/生产部署指南.md` |
+| `deploy/prod/native/*`、`deploy/prod/docker/*`、`snippet.docker.yml` | `docs/生产部署指南.md`、`docs/生产环境运维部署手册.md` |
 | 集成 / E2E 行为 | `docs/测试与验收.md` |
 | 任意用户可见行为 | `README.md`、`docs/文档索引.md` |
 

@@ -22,7 +22,7 @@ services:
       # 可选：持久化 session JSONL，便于 Dashboard / 排障
       # - ocr-gateway-sessions:/root/.opencodereview/sessions
     environment:
-      OCR_GATEWAY_SECRET: change-me-in-production
+      OCR_GATEWAY_SECRET: 9etUwp53i,_MvBV8+ko~zcctbRCftqbK
       OCR_GATEWAY_GITLAB_URL: https://gitlab.aulton.com
       OCR_GATEWAY_GITLAB_API_URL: https://gitlab.aulton.com
       OCR_GATEWAY_GITLAB_PUBLIC_URL: https://gitlab.aulton.com
