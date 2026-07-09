@@ -105,7 +105,7 @@ curl http://localhost:8010/health
 | 文件 | 作用 |
 |------|------|
 | test_gateway_api.py 等 | 单元测试（默认 `pytest`） |
-| [test_gitlab_mr_sync.py](tests/test_gitlab_mr_sync.py) | **可选**：monorepo 内与 ocr-ci 脚本同步校验 |
+| `e2e/ocr-gateway/tests/` | E2E 辅助逻辑 pytest（见 [e2e/ocr-gateway/README.md](e2e/ocr-gateway/README.md)） |
 
 ## 配置
 
@@ -119,7 +119,8 @@ Gateway 环境变量见 [docs/本地部署指南.md](docs/本地部署指南.md)
 ```powershell
 cd ocr-ci2
 pip install -r requirements-dev.txt
-pytest
+pytest                              # 单元测试（tests/）
+cd e2e/ocr-gateway; python -m pytest -q   # E2E 辅助用例
 ```
 
 E2E 见 [docs/测试与验收.md](docs/测试与验收.md)。

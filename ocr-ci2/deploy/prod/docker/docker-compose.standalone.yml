@@ -1,6 +1,7 @@
 # OCR Gateway only（GitLab 独立部署，如 https://gitlab.aulton.com）。
 #
 # Aulton 生产（宿主机 172.16.5.119）：
+#   运维目录：/aulton/apps/ocr-gateway（本文件 + ocr-gateway-prod.tar 放此目录）
 #   宿主机端口 48010 → 容器内 8010（镜像内 uvicorn 固定监听 8010）
 #   CI Variable OCR_GATEWAY_URL=http://172.16.5.119:48010
 #   Dashboard：http://172.16.5.119:48010/

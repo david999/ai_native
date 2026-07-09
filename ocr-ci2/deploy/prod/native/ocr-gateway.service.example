@@ -2,11 +2,12 @@
 #
 # Install:
 #   sudo cp deploy/prod/native/ocr-gateway.service.example /etc/systemd/system/ocr-gateway.service
-#   sudo sed -i "s|/opt/ocr-ci2|$(pwd)|g" /etc/systemd/system/ocr-gateway.service
+#   sudo sed -i "s|/aulton/apps/ocr-ci2|$(pwd)|g" /etc/systemd/system/ocr-gateway.service
 #   sudo sed -i "s|YOUR_USER|$USER|g" /etc/systemd/system/ocr-gateway.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now ocr-gateway
 #
+# Aulton 默认源码路径：/aulton/apps/ocr-ci2（原生部署，非 Docker compose 目录）
 # Requires: deploy/prod/native/gateway.env
 
 [Unit]
@@ -16,9 +17,9 @@ After=network.target
 [Service]
 Type=simple
 User=YOUR_USER
-WorkingDirectory=/opt/ocr-ci2
-Environment=PYTHONPATH=/opt/ocr-ci2
-EnvironmentFile=/opt/ocr-ci2/deploy/prod/native/gateway.env
+WorkingDirectory=/aulton/apps/ocr-ci2
+Environment=PYTHONPATH=/aulton/apps/ocr-ci2
+EnvironmentFile=/aulton/apps/ocr-ci2/deploy/prod/native/gateway.env
 ExecStart=/usr/bin/python3 -m uvicorn gateway.main:app --host 0.0.0.0 --port 8010
 Restart=on-failure
 RestartSec=5

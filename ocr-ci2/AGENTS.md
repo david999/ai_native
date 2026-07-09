@@ -8,7 +8,7 @@
 |------|------|
 | 改代码 | 优先只动 `ocr-ci2/` 内文件 |
 | 部署文档 | `docs/本地部署指南.md`、`docs/生产部署指南.md`、`docs/架构说明.md` — **禁止**引用 `../test_data`、`../evn`、`../ocr-ci` |
-| 测试文档 | `docs/测试与验收.md` — **可**引用 monorepo 路径（datacalc-web、verify 脚本等），并同步 [test_data/README.md](../test_data/README.md) 相关小节 |
+| 测试文档 | `docs/测试与验收.md`、`e2e/*` — 路径均在 ocr-ci2 内；拆仓见 `docs/独立仓库迁移检查清单.md` |
 
 ## 文档同步
 

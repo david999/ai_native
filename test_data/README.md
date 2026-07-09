@@ -19,14 +19,16 @@ test_data/
 
 ## OCR Gateway（ocr-ci2）联调
 
+> **迁移说明**：E2E 与 fixtures 将迁入独立仓 `ocr-ci2/e2e/`（[迁移检查清单](../ocr-ci2/docs/独立仓库迁移检查清单.md)）。过渡期本目录仍为副本。
+
 | 项 | 说明 |
 |----|------|
-| 样例仓 | [`datacalc-web/`](datacalc-web/) — 对应 GitLab `java_group/datacalc-web` |
+| 样例仓 | [`datacalc-web/`](datacalc-web/) — 对应 GitLab `java_group/datacalc-web`（未来为 ocr-ci2 submodule） |
 | Gateway | `ocr-ci2/deploy/local/run.ps1`，`:8010` |
 | CI 片段 | 与 [`ocr-ci2/deploy/prod/ci/snippet.native-host.yml`](../ocr-ci2/deploy/prod/ci/snippet.native-host.yml) 对齐 |
 | 文档 | [ocr-ci2/docs/测试与验收.md](../ocr-ci2/docs/测试与验收.md) |
-| 跑前检查 | `test_data/scripts/verify_l3b_runner.ps1 -ProjectPath java_group/datacalc-web` |
-| **自动化 E2E** | [`e2e/ocr-gateway/run_e2e.ps1`](e2e/ocr-gateway/run_e2e.ps1) — D01–D06 全链路（D05/D06 验证 `.opencodereview/rule.json`） |
+| 跑前检查 | `test_data/scripts/verify_l3b_runner.ps1`（未来 → `ocr-ci2/scripts/acceptance/verify_gateway_runner.ps1`） |
+| **自动化 E2E** | [`e2e/ocr-gateway/run_e2e.ps1`](e2e/ocr-gateway/run_e2e.ps1)（未来 → `ocr-ci2/e2e/ocr-gateway/`） |
 
 与 **AICR Reviewer（:8001）**、`spring-cloud-demo` 验收相互独立；勿混淆端口与 CI 变量。
 

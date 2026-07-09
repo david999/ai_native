@@ -1,0 +1,7 @@
+id: D03_bug_empty_catch
+title: empty catch swallows exception
+branch: ocr-test/D03_bug_empty_catch
+commit_message: "test(D03): empty catch block swallows exception"
+files:
+  - dest: src/main/java/com/aulton/datacalc/service/impl/IdealEnergyServiceImpl.java
+    source: files/IdealEnergyServiceImpl.java

@@ -48,7 +48,7 @@
 | [Dockerfile](prod/docker/Dockerfile) | OCR + Gateway 合一镜像 |
 | [docker-compose.yml](prod/docker/docker-compose.yml) | 与 GitLab 同 Docker 网络（`gitlab_default`） |
 | [docker-compose.standalone.yml](prod/docker/docker-compose.standalone.yml) | GitLab 独立部署（Aulton：`48010:8010`） |
-| [aulton.prod.env.example](prod/docker/aulton.prod.env.example) | Aulton 生产 IP/端口/CI URL（`172.16.5.119:48010`） |
+| [aulton.prod.env.example](prod/docker/aulton.prod.env.example) | Aulton 生产 IP/端口/CI URL；运维目录 **`/aulton/apps/ocr-gateway`** |
 | [prod.config.json.example](prod/docker/prod.config.json.example) | bake 用配置模板（复制为 `prod.config.json`，勿提交） |
 | [build_image.ps1](prod/docker/build_image.ps1) | 在 **ocr-ci2 根目录** bake 并 build |
 | [run.ps1](prod/docker/run.ps1) | compose up（默认 `docker-compose.yml`） |

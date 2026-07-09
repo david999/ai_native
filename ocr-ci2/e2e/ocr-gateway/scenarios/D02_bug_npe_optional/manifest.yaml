@@ -1,0 +1,7 @@
+id: D02_bug_npe_optional
+title: Optional.orElse(null) without null guard
+branch: ocr-test/D02_bug_npe_optional
+commit_message: "test(D02): Optional.orElse(null) without null guard"
+files:
+  - dest: src/main/java/com/aulton/datacalc/service/impl/SingleChargeListServiceImpl.java
+    source: files/SingleChargeListServiceImpl.java

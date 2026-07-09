@@ -1,5 +1,8 @@
 # OCR Gateway + datacalc-web 本地 E2E 自动化
 
+> **主维护位置（迁移中）**：独立仓 `ocr-ci2/e2e/ocr-gateway/`。  
+> 本目录为 **ai_native monorepo 过渡期副本**，请勿在此修改；步骤见 [ocr-ci2/docs/独立仓库迁移检查清单.md](../../../ocr-ci2/docs/独立仓库迁移检查清单.md)。
+
 在 **ai_native monorepo** 内一键跑通：场景注入 → push → MR → GitLab CI `code-review` → OCR Gateway → MR 评论。
 
 ## 前置条件

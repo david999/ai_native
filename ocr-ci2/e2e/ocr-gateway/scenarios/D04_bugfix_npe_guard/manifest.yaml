@@ -1,0 +1,7 @@
+id: D04_bugfix_npe_guard
+title: fix NPE with null guard after Optional
+branch: ocr-test/D04_bugfix_npe_guard
+commit_message: "fix(D04): add null guard after Optional.orElse(null)"
+files:
+  - dest: src/main/java/com/aulton/datacalc/service/impl/SingleChargeListServiceImpl.java
+    source: files/SingleChargeListServiceImpl.java

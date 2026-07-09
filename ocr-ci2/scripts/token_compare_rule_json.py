@@ -8,7 +8,7 @@ Usage::
 
     cd ocr-ci2
     python scripts/token_compare_rule_json.py \\
-        --repo ../test_data/datacalc-web \\
+        --repo e2e/fixtures/datacalc-web \\
         --branch ocr-test/D05_rule_severity_prefix \\
         --from origin/master --to HEAD
 
@@ -33,7 +33,7 @@ if str(_ROOT / "scripts") not in sys.path:
 
 from session_telemetry import SessionTelemetry, scan_session_jsonl, sessions_root  # noqa: E402
 
-DEFAULT_REPO = _ROOT.parent / "test_data" / "datacalc-web"
+DEFAULT_REPO = _ROOT / "e2e" / "fixtures" / "datacalc-web"
 RULE_REL = Path(".opencodereview") / "rule.json"
 SESSION_WAIT_SEC = 90
 SESSION_POLL_SEC = 2

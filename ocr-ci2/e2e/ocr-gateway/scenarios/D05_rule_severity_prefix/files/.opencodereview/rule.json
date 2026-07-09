@@ -1,0 +1,23 @@
+{
+  "exclude": [
+    "**/target/**",
+    "**/*.class",
+    "**/test/**",
+    "**/*Test.java",
+    "**/*Tests.java"
+  ],
+  "rules": [
+    {
+      "path": "src/**",
+      "rule": "审查本次 diff，优先发现安全漏洞、NPE/崩溃、SQL 注入、分层违规（如 Controller 内拼 SQL）。每条评论必须以 [HIGH]/[MEDIUM]/[LOW] 开头：HIGH=安全/崩溃/数据丢失；MEDIUM=性能/可维护性/边界；LOW=风格/可读性。默认仅基于 diff 与必要上下文，勿先 file_read 全文件。仅当 diff 涉及架构或安全疑点时，才 file_read AGENTS.md 或 .ai/rules 中与变更相关的单个文件；禁止 file_find 遍历整个 .ai 目录。"
+    },
+    {
+      "path": ".opencodereview/**",
+      "rule": "仅检查 rule 配置合理性（路径 glob、文案清晰度），无需读取 AGENTS.md 或 .ai 目录。"
+    },
+    {
+      "path": "**/*.xml",
+      "rule": "MyBatis mapper XML：检查 SQL 注入风险、动态 SQL 拼接、索引使用；无需读取 AGENTS.md。"
+    }
+  ]
+}

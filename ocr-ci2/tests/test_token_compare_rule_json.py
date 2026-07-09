@@ -113,7 +113,7 @@ def test_live_rule_json_token_comparison():
     """Live: two ocr review runs on datacalc-web D05 branch."""
     from token_compare_rule_json import run_comparison
 
-    repo = Path(__file__).resolve().parents[2] / "test_data" / "datacalc-web"
+    repo = Path(__file__).resolve().parents[1] / "e2e" / "fixtures" / "datacalc-web"
     with_arm, without_arm = run_comparison(
         repo,
         from_ref="origin/master",

@@ -1,0 +1,7 @@
+id: D01_feature_date_guard
+title: 换电时间起止顺序校验
+branch: ocr-test/D01_feature_date_guard
+commit_message: "feat(D01): validate exchange start before end time"
+files:
+  - dest: src/main/java/com/aulton/datacalc/service/impl/ChangeBatteryListServiceImpl.java
+    source: files/ChangeBatteryListServiceImpl.java

@@ -13,38 +13,32 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-REPO_ROOT = ROOT.parent
+_ACCEPTANCE = SCRIPTS / "acceptance"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
+if str(_ACCEPTANCE) not in sys.path:
+    sys.path.insert(0, str(_ACCEPTANCE))
 
+from env_loader import load_dotenv, resolve_gitlab_token  # noqa: E402
 from gitlab_mr import GitLabMrClient, colorize_severity, post_review_from_files
-from ocr_ci_config import resolve_gitlab_api_token
 
-PROJECT_PATH = os.environ.get("OCR_TEST_PROJECT_PATH", "java_group/datacalc-web")
-GITLAB_URL = os.environ.get("GITLAB_URL", "http://localhost:8000").rstrip("/")
-PREFERRED_BRANCH = os.environ.get("OCR_TEST_MR_BRANCH", "ocr-test/D05_rule_severity_prefix")
+PREFERRED_BRANCH = "ocr-test/D05_rule_severity_prefix"
 
 
-def _load_monorepo_env() -> None:
-    aicr = REPO_ROOT / "aicr-reviewer"
-    if aicr.is_dir() and str(aicr) not in sys.path:
-        sys.path.insert(0, str(aicr))
-    try:
-        from app.env_loader import apply_monorepo_env
+def _gitlab_url() -> str:
+    return os.environ.get("GITLAB_URL", "http://localhost:8000").rstrip("/")
 
-        apply_monorepo_env()
-    except ImportError:
-        pass
+
+def _project_path() -> str:
+    return os.environ.get("OCR_TEST_PROJECT_PATH", "java_group/datacalc-web")
+
+
+def _preferred_branch() -> str:
+    return os.environ.get("OCR_TEST_MR_BRANCH", PREFERRED_BRANCH)
 
 
 def _token() -> str:
-    return (
-        os.environ.get("GITLAB_API_TOKEN")
-        or os.environ.get("AICR_BOT_TOKEN")
-        or os.environ.get("ROOT_PAT")
-        or resolve_gitlab_api_token()
-        or ""
-    )
+    return resolve_gitlab_token()
 
 
 def _api_get(url: str, token: str) -> dict | list:
@@ -54,33 +48,34 @@ def _api_get(url: str, token: str) -> dict | list:
 
 
 def _project_id(token: str) -> int:
-    enc = urllib.parse.quote(PROJECT_PATH, safe="")
-    data = _api_get(f"{GITLAB_URL}/api/v4/projects/{enc}", token)
+    enc = urllib.parse.quote(_project_path(), safe="")
+    data = _api_get(f"{_gitlab_url()}/api/v4/projects/{enc}", token)
     return int(data["id"])
 
 
 def _pick_mr_iid(token: str, project_id: int) -> tuple[int, str]:
     open_mrs = _api_get(
-        f"{GITLAB_URL}/api/v4/projects/{project_id}/merge_requests?state=opened&per_page=50",
+        f"{_gitlab_url()}/api/v4/projects/{project_id}/merge_requests?state=opened&per_page=50",
         token,
     )
     if not isinstance(open_mrs, list):
         raise RuntimeError("failed to list open MRs")
 
+    branch = _preferred_branch()
     for mr in open_mrs:
-        if mr.get("source_branch") == PREFERRED_BRANCH:
+        if mr.get("source_branch") == branch:
             return int(mr["iid"]), str(mr.get("web_url") or "")
 
     if open_mrs:
         mr = open_mrs[0]
         return int(mr["iid"]), str(mr.get("web_url") or "")
 
-    raise RuntimeError(f"no open MR in {PROJECT_PATH}")
+    raise RuntimeError(f"no open MR in {_project_path()}")
 
 
 def _latest_note_body(token: str, project_id: int, mr_iid: int) -> str:
     notes = _api_get(
-        f"{GITLAB_URL}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes?sort=desc&order_by=created_at&per_page=5",
+        f"{_gitlab_url()}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes?sort=desc&order_by=created_at&per_page=5",
         token,
     )
     if not isinstance(notes, list) or not notes:
@@ -93,7 +88,7 @@ def main() -> int:
         print("SKIP: set OCR_TEST_LIVE=1 to post test notes to GitLab MR", file=sys.stderr)
         return 0
 
-    _load_monorepo_env()
+    load_dotenv()
     token = _token()
     if not token:
         print("FAIL: no GitLab token (AICR_BOT_TOKEN / GITLAB_API_TOKEN / config.json)", file=sys.stderr)
@@ -101,10 +96,10 @@ def main() -> int:
 
     project_id = _project_id(token)
     mr_iid, mr_url = _pick_mr_iid(token, project_id)
-    print(f"Target MR: {PROJECT_PATH} !{mr_iid} ({mr_url or 'n/a'})")
+    print(f"Target MR: {_project_path()} !{mr_iid} ({mr_url or 'n/a'})")
 
     client = GitLabMrClient(
-        gitlab_url=GITLAB_URL,
+        gitlab_url=_gitlab_url(),
         project_id=str(project_id),
         mr_iid=str(mr_iid),
         api_token=token,
@@ -170,7 +165,7 @@ def main() -> int:
             print(f"WARN: post_review_from_files exit {code} (may still have posted fallback)")
 
     notes = _api_get(
-        f"{GITLAB_URL}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes?sort=desc&order_by=created_at&per_page=10",
+        f"{_gitlab_url()}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes?sort=desc&order_by=created_at&per_page=10",
         token,
     )
     fallback_ok = False
@@ -187,7 +182,8 @@ def main() -> int:
         return 1
 
     print("PASS: GitLab severity color Plan B verified")
-    print(f"View MR: {mr_url or GITLAB_URL + '/' + PROJECT_PATH + '/-/merge_requests/' + str(mr_iid)}")
+    base = mr_url or f"{_gitlab_url()}/{_project_path()}/-/merge_requests/{mr_iid}"
+    print(f"View MR: {base}")
     return 0
 
 

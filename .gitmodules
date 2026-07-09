@@ -1,0 +1,3 @@
+[submodule "ocr-ci2/e2e/fixtures/datacalc-web"]
+	path = ocr-ci2/e2e/fixtures/datacalc-web
+	url = https://gitlab.aulton.com/java_group/datacalc-web.git
