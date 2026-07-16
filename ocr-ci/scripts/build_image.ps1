@@ -7,7 +7,8 @@
 # Usage:
 #   .\scripts\build_image.ps1
 #   .\scripts\build_image.ps1 -UserConfig C:\Users\you\.opencodereview\config.json
-#   .\scripts\build_image.ps1 -SkipSecretCheck   # defaults-only trial (not for production)
+#   .\scripts\build_image.ps1 -SkipSecretCheck   # skip secret validation (not for production)
+# Bake：将 -UserConfig / ~/.opencodereview/config.json **原样**写入 .build（无 defaults 合并）
 
 param(
     [string]$Tag = "ocr-ci:local",
@@ -35,7 +36,7 @@ if ($UserConfig) {
         Write-Host "Baking from user config: $defaultUserConfig"
         $bakeArgs += @("--from-user-config")
     } else {
-        Write-Warning "Missing $defaultUserConfig — baking repo defaults only"
+        Write-Error "Provide -UserConfig path or create $defaultUserConfig"
     }
 }
 if ($EnvFile) {

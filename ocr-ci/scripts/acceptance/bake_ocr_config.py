@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Bake OpenCodeReview ~/.opencodereview/config.json for ocr-ci Docker image.
+"""Bake OpenCodeReview 配置为 ocr-ci Docker 镜像用 config.json。
 
-**Not an automated test script** — run at image build time via build_image.ps1.
-You keep OCR config in ~/.opencodereview/config.json; this merges it into
-.build/config.json for COPY into the image.
+**非自动化测试脚本** — 在 build_image.ps1 构建镜像时执行。
+日常 OCR 配置仍放在 ~/.opencodereview/config.json。
 
-Usage:
+> **Gateway 生产请用 ocr-ci2**：本目录为方案 2（CI 内跑 OCR）。Gateway 见仓库 `ocr-ci2/`。
+
+用法：
   python scripts/acceptance/bake_ocr_config.py --from-user-config -o .build/config.json
+  python scripts/acceptance/bake_ocr_config.py --config path/to/config.json -o .build/config.json
+
+逻辑清单：
+- 直接复制用户提供的 config.json（--config / --from-user-config），**不做 defaults 合并**
+- 可选 --env-file / --include-process-env：仅覆盖 llm/gitlab 相关密钥字段
+- --require-secrets：缺少 llm/gitlab token 时 bake 失败（build_image.ps1 默认开启）
 """
 
 from __future__ import annotations
@@ -26,13 +33,6 @@ from ocr_ci_config import gitlab_api_token_from_config, user_config_path
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
-
-
-def load_defaults() -> dict[str, Any]:
-    """Load config/defaults.config.json (no secrets; extra_body + use_anthropic only)."""
-    path = _repo_root() / "config" / "defaults.config.json"
-    with path.open(encoding="utf-8") as f:
-        return json.load(f)
 
 
 def parse_env_file(path: Path) -> dict[str, str]:
@@ -57,15 +57,13 @@ def llm_url_from_base(base: str) -> str:
     return f"{base}/chat/completions"
 
 
-def merge_llm_from_mapping(cfg: dict[str, Any], mapping: dict[str, str]) -> None:
+def apply_llm_from_mapping(cfg: dict[str, Any], mapping: dict[str, str]) -> None:
     llm = cfg.setdefault("llm", {})
-
     url = mapping.get("OCR_LLM_URL") or ""
     if not url and mapping.get("LLM_API_BASE"):
         url = llm_url_from_base(mapping["LLM_API_BASE"])
     if url:
         llm["url"] = url
-
     token = (
         mapping.get("OCR_LLM_TOKEN")
         or mapping.get("OCR_LLM_AUTH_TOKEN")
@@ -74,54 +72,46 @@ def merge_llm_from_mapping(cfg: dict[str, Any], mapping: dict[str, str]) -> None
     )
     if token:
         llm["auth_token"] = token
-
     model = mapping.get("OCR_LLM_MODEL") or mapping.get("LLM_MODEL") or ""
     if model:
         llm["model"] = model
-
     if mapping.get("OCR_USE_ANTHROPIC"):
         llm["use_anthropic"] = mapping["OCR_USE_ANTHROPIC"].lower() in ("1", "true", "yes")
 
 
-def merge_gitlab_from_mapping(cfg: dict[str, Any], mapping: dict[str, str]) -> None:
+def apply_gitlab_from_mapping(cfg: dict[str, Any], mapping: dict[str, str]) -> None:
     token = mapping.get("GITLAB_API_TOKEN") or mapping.get("AICR_BOT_TOKEN") or ""
     if token:
         cfg.setdefault("gitlab", {})["api_token"] = token
 
 
-def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    result = json.loads(json.dumps(base))
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(result.get(key), dict):
-            result[key] = deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+def load_config_file(path: Path) -> dict[str, Any]:
+    with path.open(encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"config must be a JSON object: {path}")
+    return data
 
 
 def build_config(
     *,
+    config_file: Path,
     env_file: Path | None = None,
-    config_file: Path | None = None,
     include_process_env: bool = False,
 ) -> dict[str, Any]:
-    """Merge defaults ← JSON overlay ← optional dotenv / process env (legacy paths)."""
-    cfg = load_defaults()
-    if config_file:
-        with config_file.open(encoding="utf-8") as f:
-            overlay = json.load(f)
-        cfg = deep_merge(cfg, overlay)
+    """以 config_file 为唯一基底，可选 env 覆盖密钥字段。"""
+    cfg = load_config_file(config_file)
     if env_file:
         env_map = parse_env_file(env_file)
-        merge_llm_from_mapping(cfg, env_map)
-        merge_gitlab_from_mapping(cfg, env_map)
+        apply_llm_from_mapping(cfg, env_map)
+        apply_gitlab_from_mapping(cfg, env_map)
     if include_process_env:
-        merge_llm_from_mapping(cfg, {k: v for k, v in os.environ.items() if v})
+        apply_llm_from_mapping(cfg, {k: v for k, v in os.environ.items() if v})
+        apply_gitlab_from_mapping(cfg, {k: v for k, v in os.environ.items() if v})
     return cfg
 
 
 def validate_baked_config(cfg: dict[str, Any]) -> list[str]:
-    """Return human-readable missing/invalid fields for production baked images."""
     missing: list[str] = []
     llm = cfg.get("llm")
     if not isinstance(llm, dict):
@@ -149,20 +139,16 @@ def main() -> None:
         default=_repo_root() / ".build" / "config.json",
         help="Output path (default: <repo>/.build/config.json)",
     )
-    parser.add_argument(
-        "--env-file",
-        type=Path,
-        help="Read LLM_* / OCR_LLM_* from dotenv (e.g. ../evn/.env)",
-    )
+    parser.add_argument("--env-file", type=Path, help="Optional dotenv to override LLM/GitLab tokens")
     parser.add_argument(
         "--config",
         type=Path,
-        help="Merge a JSON file (default with --from-user-config: ~/.opencodereview/config.json)",
+        help="Source config.json (required unless --from-user-config)",
     )
     parser.add_argument(
         "--from-user-config",
         action="store_true",
-        help="Merge %USERPROFILE%/.opencodereview/config.json (recommended)",
+        help="Use ~/.opencodereview/config.json",
     )
     parser.add_argument(
         "--include-process-env",
@@ -172,41 +158,58 @@ def main() -> None:
     parser.add_argument(
         "--require-secrets",
         action="store_true",
-        help="Exit 1 if llm.url/auth_token/model or gitlab.api_token missing (used by build_image.ps1)",
+        help="Exit 1 if llm/gitlab secrets missing (used by build_image.ps1)",
     )
     args = parser.parse_args()
 
     config_file = args.config
     if args.from_user_config and not config_file:
         config_file = user_config_path()
-        if not config_file.is_file():
-            print(f"User config not found: {config_file}", file=sys.stderr)
-            sys.exit(1)
+    if not config_file:
+        print("ERROR: provide --config PATH or --from-user-config", file=sys.stderr)
+        sys.exit(2)
+    if not config_file.is_file():
+        print(f"Config not found: {config_file}", file=sys.stderr)
+        sys.exit(1)
+    if args.from_user_config and args.config:
+        print(
+            f"WARN: both --config and --from-user-config set; using --config {args.config}",
+            file=sys.stderr,
+        )
 
-    cfg = build_config(
-        env_file=args.env_file,
-        config_file=config_file,
-        include_process_env=args.include_process_env,
-    )
+    try:
+        cfg = build_config(
+            config_file=config_file,
+            env_file=args.env_file,
+            include_process_env=args.include_process_env,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"ERROR: failed to load config {config_file}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     if args.require_secrets:
         missing = validate_baked_config(cfg)
         if missing:
             print("Baked config validation failed:", ", ".join(missing), file=sys.stderr)
             sys.exit(1)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+
+    try:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError as exc:
+        print(f"ERROR: failed to write {args.output}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     llm = cfg.get("llm", {})
-    has_llm_secret = bool(llm.get("auth_token"))
-    has_gitlab = bool(gitlab_api_token_from_config(cfg))
-    print(f"Wrote {args.output}", file=sys.stderr)
+    print(f"Wrote {args.output} (from {config_file})", file=sys.stderr)
     print(
         f"  llm.url={'set' if llm.get('url') else 'unset'}, "
         f"llm.model={llm.get('model') or 'unset'}, "
-        f"llm.auth_token={'set' if has_llm_secret else 'unset'}, "
-        f"gitlab.api_token={'set' if has_gitlab else 'unset'}",
+        f"llm.auth_token={'set' if llm.get('auth_token') else 'unset'}, "
+        f"gitlab.api_token={'set' if gitlab_api_token_from_config(cfg) else 'unset'}, "
+        f"llm.extra_body={llm.get('extra_body')!r}",
         file=sys.stderr,
     )
     print(

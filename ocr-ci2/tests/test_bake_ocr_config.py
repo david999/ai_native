@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 _ACCEPTANCE = Path(__file__).resolve().parents[1] / "scripts" / "acceptance"
 if str(_ACCEPTANCE) not in sys.path:
     sys.path.insert(0, str(_ACCEPTANCE))
@@ -47,6 +49,55 @@ def test_build_config_preserves_extra_body_if_present(tmp_path: Path):
     cfg_path.write_text(json.dumps(src), encoding="utf-8")
     cfg = build_config(config_file=cfg_path)
     assert cfg["llm"]["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_main_rejects_invalid_json(tmp_path: Path, capsys):
+    """非法 JSON 应 exit 1，并打印清晰错误（非裸栈）。"""
+    from bake_ocr_config import main
+
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json", encoding="utf-8")
+    out = tmp_path / "out.json"
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "bake_ocr_config.py",
+            "--config",
+            str(bad),
+            "-o",
+            str(out),
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+    finally:
+        sys.argv = old_argv
+    err = capsys.readouterr().err
+    assert "failed to load config" in err
+
+
+def test_main_rejects_non_object_json(tmp_path: Path, capsys):
+    from bake_ocr_config import main
+
+    bad = tmp_path / "arr.json"
+    bad.write_text("[1, 2]", encoding="utf-8")
+    out = tmp_path / "out.json"
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "bake_ocr_config.py",
+            "--config",
+            str(bad),
+            "-o",
+            str(out),
+        ]
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+    finally:
+        sys.argv = old_argv
+    err = capsys.readouterr().err
+    assert "failed to load config" in err
 
 
 def test_env_file_overrides_token(tmp_path: Path):

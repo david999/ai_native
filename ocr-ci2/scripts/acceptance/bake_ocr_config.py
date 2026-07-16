@@ -148,21 +148,35 @@ def main() -> None:
     if not config_file.is_file():
         print(f"Config not found: {config_file}", file=sys.stderr)
         sys.exit(1)
+    if args.from_user_config and args.config:
+        print(
+            f"WARN: both --config and --from-user-config set; using --config {args.config}",
+            file=sys.stderr,
+        )
 
-    cfg = build_config(
-        config_file=config_file,
-        env_file=args.env_file,
-        include_process_env=args.include_process_env,
-    )
+    try:
+        cfg = build_config(
+            config_file=config_file,
+            env_file=args.env_file,
+            include_process_env=args.include_process_env,
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"ERROR: failed to load config {config_file}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     if args.require_secrets:
         missing = validate_baked_config(cfg)
         if missing:
             print("Baked config validation failed:", ", ".join(missing), file=sys.stderr)
             sys.exit(1)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    try:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with args.output.open("w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError as exc:
+        print(f"ERROR: failed to write {args.output}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     llm = cfg.get("llm", {})
     print(f"Wrote {args.output} (from {config_file})", file=sys.stderr)

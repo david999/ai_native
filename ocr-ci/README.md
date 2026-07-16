@@ -1,10 +1,8 @@
 # OCR GitLab CI
 
+[Alibaba Open Code Review (OCR)](https://github.com/alibaba/open-code-review) **方案 2**：在 GitLab MR Pipeline 内执行 `ocr review` 并回写 MR 评论。
 
-
-[Alibaba Open Code Review (OCR)](https://github.com/alibaba/open-code-review) 方案 2：在 GitLab MR Pipeline 内执行 `ocr review` 并回写 MR 评论。
-
-
+> **Gateway（方案 3）请用 [`ocr-ci2/`](../ocr-ci2/)**。本目录仅服务「CI Job 内跑 OCR」；勿用本目录的 `bake_ocr_config.py` 打 Gateway 生产镜像。
 
 ## 单一配置源（推荐）
 
@@ -26,9 +24,7 @@
 
     "model": "your-model",
 
-    "use_anthropic": false,
-
-    "extra_body": { "thinking": { "type": "disabled" } }
+    "use_anthropic": false
 
   },
 
@@ -100,11 +96,9 @@ GitLab:   Job env GITLAB_API_TOKEN  >  config.json gitlab.api_token  >  CI_JOB_T
 
 | [`.gitignore`](.gitignore) | Git | 忽略 `.build/` 本地生成物 |
 
-| [`config/defaults.config.json`](config/defaults.config.json) | 配置 | bake 基底（无密钥）：`use_anthropic`、`extra_body.thinking` |
-
 | [`config/ocr-ci.config.json.example`](config/ocr-ci.config.json.example) | 文档 | 用户 `~/.opencodereview/config.json` 字段示例 |
 
-| [`scripts/acceptance/bake_ocr_config.py`](scripts/acceptance/bake_ocr_config.py) | 构建辅助 | 从 `~/.opencodereview/config.json` 生成 `.build/config.json`（非自动化测试） |
+| [`scripts/acceptance/bake_ocr_config.py`](scripts/acceptance/bake_ocr_config.py) | 构建辅助 | 将 `--config` / 用户 config **原样**写入 `.build/config.json`（无 defaults 合并） |
 
 | [`scripts/build_image.ps1`](scripts/build_image.ps1) | 工具 | 调用 bake + `docker build -t ocr-ci:local` |
 
