@@ -5,7 +5,7 @@
 #
 # 逻辑清单：
 # - 校验：python 在 PATH（用于 bake 脚本）
-# - Bake：.build/config.json（用户配置或默认；默认 --require-secrets，可用 -SkipSecretCheck 关闭）
+# - Bake：将 -UserConfig / ~/.opencodereview/config.json **原样**写入 .build/config.json（无 defaults 合并）
 # - 构建：docker build -f deploy/prod/docker/Dockerfile -t <Tag> .（context=仓库根）
 # - 不做：镜像内跳过 OCR npm（Dockerfile 始终 npm install -g）；启动容器
 
@@ -35,7 +35,7 @@ if ($UserConfig) {
     Write-Host "Baking from user config: $env:USERPROFILE\.opencodereview\config.json"
     $bakeArgs += @("--from-user-config")
 } else {
-    Write-Warning "Missing user config — baking defaults only"
+    Write-Error "Provide -UserConfig path or create $env:USERPROFILE\.opencodereview\config.json"
 }
 if ($EnvFile) {
     $bakeArgs += @("--env-file", (Resolve-Path $EnvFile))

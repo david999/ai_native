@@ -81,8 +81,7 @@ curl http://localhost:8010/health
 
 | 文件 | 作用 |
 |------|------|
-| [defaults.config.json](config/defaults.config.json) | OCR 默认片段 |
-| [ocr-gateway.config.json.example](config/ocr-gateway.config.json.example) | Gateway 场景示例 |
+| [ocr-gateway.config.json.example](config/ocr-gateway.config.json.example) | Gateway / 生产 bake 示例 |
 | [ocr-ci.config.json.example](config/ocr-ci.config.json.example) | 通用 OpenCodeReview 配置示例 |
 
 ### `deploy/` — 部署脚本

@@ -2,7 +2,7 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `bake_ocr_config.py` | 构建 Docker 镜像时从 `~/.opencodereview/config.json` 生成 `.build/config.json` |
+| `bake_ocr_config.py` | 构建镜像时将 `--config` / 用户 config **原样**写入 `.build/config.json`（无 defaults 合并） |
 | `verify_gateway_runner.ps1` | E2E 跑前检查（GitLab + Runner + Gateway） |
 | `create_or_update_mr.py` | 创建或查找 GitLab MR |
 | `env_loader.py` | 共享 `.env` / token 加载（实现位于 `scripts/env_loader.py`） |

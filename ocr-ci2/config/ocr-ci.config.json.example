@@ -1,14 +1,9 @@
 {
   "llm": {
-    "url": "https://wishub-x6.ctyun.cn/v1/chat/completions",
+    "url": "https://aigateway.aulton.com/v1/chat/completions",
     "auth_token": "YOUR_LLM_API_KEY",
-    "model": "deepseek-chat",
-    "use_anthropic": false,
-    "extra_body": {
-      "thinking": {
-        "type": "disabled"
-      }
-    }
+    "model": "Aulton-DeepSeek-V4-Flash",
+    "use_anthropic": false
   },
   "gitlab": {
     "api_token": "glpat-YOUR_GITLAB_TOKEN"
