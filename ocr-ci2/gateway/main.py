@@ -23,13 +23,11 @@ from gateway.review_service import (
     queue_depth,
     workspace_mirror_count,
 )
-from viewer.routes import mount_dashboard
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="OCR Gateway", version="0.2.0", docs_url="/docs", redoc_url=None)
-mount_dashboard(app)
 
 
 class MergeRequestReviewBody(BaseModel):
@@ -129,3 +127,9 @@ def job_status(job_id: str) -> JobStatusResponse:
         session_id=job.session_id,
         encoded_repo=job.encoded_repo,
     )
+
+
+# Dashboard 必须在 /health、/v1 之后挂载：SPA 的 StaticFiles("/") 否则会吞掉 API
+from viewer.routes import mount_dashboard  # noqa: E402
+
+mount_dashboard(app)

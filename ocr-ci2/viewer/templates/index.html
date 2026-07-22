@@ -3,137 +3,135 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MR 评审流 - OCR Gateway</title>
+    <title>评审工作台 - OCR Gateway</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<nav class="breadcrumb">
-    <a href="/">OCR Gateway Dashboard</a>
-    <span class="muted">:8010</span>
-    <span class="nav-links">
-        <a href="/repos">按仓库</a>
-    </span>
-</nav>
-<main>
-    <h1>MR 评审流</h1>
-    <p class="hint">
-        展示每个 MR 最近一次 Gateway 评审结果；深度调试可开
-        <code>ocr viewer</code> →
-        <a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
-    </p>
+    <nav class="breadcrumb">
+        <a href="/">OCR Gateway Dashboard</a>
+        <span class="muted">:8010</span>
+        <span class="nav-links">
+            <a href="/" class="tab-link active">评审工作台</a>
+            <a href="/stats" class="tab-link">统计概览</a>
+            <a href="/repos" class="tab-link">按仓库</a>
+        </span>
+    </nav>
+    <main class="workbench">
+        <div class="workbench-header">
+            <h1>评审工作台</h1>
+            <p class="hint">
+                选中左侧 MR 即可在右侧按文件查看全部评论，无需跳转。
+                {% if official_viewer_url %}深度调试可开 <code>ocr viewer</code> → <a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>{% endif %}
+            </p>
+        </div>
 
-    <section class="kpi-bar">
-        <div class="kpi"><span class="kpi-label">今日评审</span><span class="kpi-value">{{ kpis.today_reviews }}</span></div>
-        <div class="kpi"><span class="kpi-label">最新 HIGH 合计</span><span class="kpi-value sev-high">{{ kpis.open_high }}</span></div>
-        <div class="kpi"><span class="kpi-label">队列深度</span><span class="kpi-value">{{ kpis.queue_depth }}</span></div>
-        <div class="kpi"><span class="kpi-label">7 日中位 Token</span><span class="kpi-value">{{ kpis.median_tokens_7d_fmt }}</span></div>
-    </section>
+        <section class="kpi-bar">
+            <div class="kpi"><span class="kpi-label">今日评审</span><span class="kpi-value">{{ kpis.today_reviews }}</span></div>
+            <div class="kpi"><span class="kpi-label">最新 HIGH 合计</span><span class="kpi-value sev-high">{{ kpis.open_high }}</span></div>
+            <div class="kpi"><span class="kpi-label">队列深度</span><span class="kpi-value">{{ kpis.queue_depth }}</span></div>
+            <div class="kpi"><span class="kpi-label">7 日中位 Token</span><span class="kpi-value">{{ kpis.median_tokens_7d_fmt }}</span></div>
+        </section>
 
-    <div class="filters">
-        <form class="search-form" method="get" action="/">
-            <input type="search" name="q" value="{{ query }}" placeholder="按项目路径过滤…">
-            <button type="submit" class="btn">搜索</button>
-        </form>
-        {% if only_high %}
-        <a class="btn" href="/">显示全部</a>
-        {% else %}
-        <a class="btn btn-warn" href="/?highlight=high">仅含 HIGH</a>
-        {% endif %}
-        {% if only_failed %}
-        <a class="btn" href="/">清除失败筛选</a>
-        {% else %}
-        <a class="btn" href="/?highlight=failed">仅失败</a>
-        {% endif %}
-    </div>
+        <div class="filters">
+            <form class="search-form" method="get" action="/">
+                <input type="search" name="q" value="{{ query }}" placeholder="按项目路径过滤…">
+                <button type="submit" class="btn">搜索</button>
+            </form>
+            {% if only_high %}
+            <a class="btn" href="/">显示全部</a>
+            {% else %}
+            <a class="btn btn-warn" href="/?highlight=high">仅含 HIGH</a>
+            {% endif %}
+            {% if only_failed %}
+            <a class="btn" href="/">清除失败筛选</a>
+            {% else %}
+            <a class="btn" href="/?highlight=failed">仅失败</a>
+            {% endif %}
+            <span class="muted auto-refresh-hint" id="autoRefreshHint" hidden>自动刷新中…</span>
+            <span class="status-legend muted">{{ job_status_legend }}</span>
+        </div>
 
-    {% if mr_rows %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>项目 / MR</th>
-                <th>分支 / Commit</th>
-                <th>状态</th>
-                <th class="sev-high">HIGH</th>
-                <th class="sev-medium">MED</th>
-                <th class="sev-low">LOW</th>
-                <th>评论</th>
-                <th>Tokens</th>
-                <th>评审时间</th>
-                <th>摘要</th>
-                <th>操作</th>
-            </tr>
-        </thead>
-        <tbody>
-        {% for row in mr_rows %}
-            <tr{% if row.has_high %} class="row-high"{% elif row.status == 'failed' %} class="row-failed"{% elif row.status in ('queued','running') %} class="row-running"{% endif %}>
-                <td>
-                    <div>{{ row.project_path }}</div>
-                    <a href="{{ row.mr_url }}" target="_blank" rel="noopener">{{ row.mr_label }}</a>
-                </td>
-                <td>
-                    <div>{{ row.target_branch or "—" }}</div>
-                    <code>{{ row.commit_short }}</code>
-                </td>
-                <td><span class="status status-{{ row.status }}">{{ row.status }}</span></td>
-                <td class="sev-high">{{ row.high }}</td>
-                <td class="sev-medium">{{ row.medium }}</td>
-                <td class="sev-low">{{ row.low }}</td>
-                <td>{{ row.comment_count }}</td>
-                <td class="tokens">{{ row.total_tokens_fmt }}</td>
-                <td>{{ row.finished_at | format_time }}</td>
-                <td class="preview-cell">
-                    {% for p in row.high_preview %}
-                    <div class="preview-item"><code>{{ p.file_path }}</code> {{ p.snippet[:80] }}{% if p.snippet|length > 80 %}…{% endif %}</div>
+        <div class="master-detail">
+            <section class="mr-list-panel" id="mrListPanel">
+                <ul class="mr-list" id="mrList">
+                    {% for row in mr_rows %}
+                    <li class="mr-item{% if row.has_high %} mr-item-high{% elif row.status == 'failed' %} mr-item-failed{% elif row.status in ('queued','running') %} mr-item-running{% endif %}"
+                        data-job-id="{{ row.job_id }}"
+                        data-status="{{ row.status }}"
+                        tabindex="0"
+                        role="button"
+                        aria-label="查看 {{ row.project_path }} {{ row.mr_label }} 评审详情">
+                        <div class="mr-item-main">
+                            <div class="mr-item-title">
+                                <span class="mr-iid">{{ row.mr_label }}</span>
+                                <span class="mr-project muted">{{ row.project_path }}</span>
+                            </div>
+                            <div class="mr-item-meta">
+                                <span class="status status-{{ row.status }}" title="{{ row.status_hint }}">{{ row.status_label }}</span>
+                                {% if row.target_branch %}<span class="muted">{{ row.target_branch }}</span>{% endif %}
+                                <code>{{ row.commit_short }}</code>
+                                <span class="muted">{{ row.finished_at | format_time }}</span>
+                            </div>
+                        </div>
+                        <div class="mr-item-stats">
+                            {% if row.high %}<span class="sev-high" title="HIGH">H{{ row.high }}</span>{% endif %}
+                            {% if row.medium %}<span class="sev-medium" title="MEDIUM">M{{ row.medium }}</span>{% endif %}
+                            {% if row.low %}<span class="sev-low" title="LOW">L{{ row.low }}</span>{% endif %}
+                            <span class="muted tokens">{{ row.total_tokens_fmt }}</span>
+                        </div>
+                    </li>
                     {% else %}
-                    <span class="muted">—</span>
+                    <li class="empty-hint muted">暂无 Gateway MR 评审记录。触发 CI 或 POST <code>/v1/review/merge-request</code> 后将出现在此。</li>
                     {% endfor %}
-                </td>
-                <td class="links">
-                    <a href="{{ row.mr_history_url }}">历史</a>
-                    {% if row.session_url %}
-                    <a href="{{ row.session_url }}">Session</a>
-                    <a href="{{ row.official_url }}" target="_blank" rel="noopener" title="官方 Viewer（Token 按文件）">:5483</a>
-                    {% endif %}
-                </td>
-            </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">暂无 Gateway MR 评审记录。触发 CI 或 POST <code>/v1/review/merge-request</code> 后将出现在此。</p>
-    {% endif %}
+                </ul>
 
-    {% if local_repos %}
-    <details class="local-sessions">
-        <summary>本地 Session（非 Gateway 索引）</summary>
-        <table class="table compact">
-            <thead>
-                <tr>
-                    <th>Repository</th>
-                    <th>Sessions</th>
-                    <th class="sev-high">HIGH</th>
-                    <th>Latest Tokens</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-            {% for repo in local_repos %}
-                <tr>
-                    <td><a href="{{ repo.repo_url }}">{{ repo.display_name }}</a></td>
-                    <td>{{ repo.session_count }}</td>
-                    <td class="sev-high">{{ repo.high }}</td>
-                    <td>{{ repo.latest_tokens | format_tokens }}</td>
-                    <td><a href="{{ repo.repo_url }}">Sessions</a></td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    </details>
-    {% endif %}
+                {% if local_repos %}
+                <div class="local-divider muted">本地 Session（非 Gateway 索引）</div>
+                <ul class="mr-list local-list" id="localList">
+                    {% for repo in local_repos %}
+                    <li class="mr-item mr-item-local{% if repo.has_high %} mr-item-high{% endif %}"
+                        data-encoded-repo="{{ repo.encoded_path }}"
+                        data-session-id="{{ repo.latest_session_id }}"
+                        data-display-name="{{ repo.display_name }}"
+                        tabindex="0"
+                        role="button"
+                        aria-label="查看本地 Session {{ repo.display_name }} 评审详情">
+                        <div class="mr-item-main">
+                            <div class="mr-item-title">
+                                <span class="mr-iid">📁</span>
+                                <span class="mr-project">{{ repo.display_name }}</span>
+                            </div>
+                            <div class="mr-item-meta">
+                                <span class="muted">{{ repo.session_count }} sessions</span>
+                                {% if repo.latest_session_id %}
+                                <span class="muted">最新 {{ repo.latest_session_id }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="mr-item-stats">
+                            {% if repo.has_high %}<span class="sev-high">H{{ repo.high }}</span>{% endif %}
+                            {% if repo.medium %}<span class="sev-medium">M{{ repo.medium }}</span>{% endif %}
+                            {% if repo.low %}<span class="sev-low">L{{ repo.low }}</span>{% endif %}
+                            <span class="muted tokens">{{ repo.latest_tokens_fmt }}</span>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </section>
 
-    <footer class="page-footer muted">
-        官方 OCR Viewer（FileTokenBreakdown）：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
-    </footer>
-</main>
+            <section class="mr-detail-panel" id="mrDetailPanel" aria-live="polite">
+                <div class="detail-empty" id="detailEmpty">
+                    <p class="muted">← 选择左侧 MR 或本地 Session</p>
+                </div>
+                <div class="detail-content" id="detailContent" hidden></div>
+            </section>
+        </div>
+
+        <footer class="page-footer muted">
+            {% if official_viewer_url %}官方 OCR Viewer（FileTokenBreakdown）：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>{% endif %}
+        </footer>
+    </main>
+    <script src="/static/app.js"></script>
 </body>
 </html>

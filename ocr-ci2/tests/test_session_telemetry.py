@@ -201,6 +201,7 @@ def test_discover_repos_and_list_sessions(tmp_path: Path, monkeypatch):
 
     sessions = list_repo_sessions(tmp_path, "repo,group,proj-111")
     assert len(sessions) == 2
+    assert repos[0].latest_session_id == sessions[0].session_id
     high_session = next(s for s in sessions if s.session_id == "s2")
     assert high_session.has_high
 

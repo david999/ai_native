@@ -8,3 +8,7 @@ test-results/
 __pycache__/
 .pytest_cache/
 *.tar
+# Vue SPA 本地依赖（产物可按需提交或镜像内构建）
+viewer-spa/node_modules/
+viewer-spa-demo/node_modules/
+viewer-spa-demo/dist/

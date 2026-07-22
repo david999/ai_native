@@ -8,3 +8,7 @@ deploy/
 .build/ocr-stderr.log
 tests/
 requirements-dev.txt
+# SPA：只拷源码，由镜像内 npm run build；排除本地依赖与产物
+viewer-spa/node_modules/
+viewer-spa/dist/
+viewer-spa-demo/

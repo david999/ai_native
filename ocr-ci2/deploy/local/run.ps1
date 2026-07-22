@@ -115,10 +115,26 @@ if ($LASTEXITCODE -ne 0) {
     Write-Error "Python package 'jinja2' is missing (Dashboard needs it). Run: .\deploy\local\install.ps1"
 }
 
+# 默认 SPA 开启（未设置或非 0 均视为开启）；显式 0 才回退 HTMX
+$spaRaw = if ($null -ne $env:OCR_DASHBOARD_SPA) { $env:OCR_DASHBOARD_SPA } else { "1" }
+$spaOff = @("0", "false", "no", "off") -contains $spaRaw.ToLower()
+if (-not $spaOff) {
+    $spaDist = Join-Path $Root "viewer-spa\dist\index.html"
+    if (-not (Test-Path $spaDist)) {
+        Write-Warning "OCR_DASHBOARD_SPA 默认开启，但 viewer-spa/dist 缺失。Build: cd viewer-spa; npm install; npm run build"
+        Write-Warning "Falling back to HTMX (方案 A) until dist exists."
+    } else {
+        Write-Host "Dashboard mode: SPA (方案 C, default). HTMX fallback: http://localhost:${port}/legacy/"
+    }
+} else {
+    Write-Host "Dashboard mode: HTMX (方案 A). Remove OCR_DASHBOARD_SPA=0 to use Vue SPA."
+}
+
 Write-Host "Starting OCR Gateway on http://0.0.0.0:${port} (Ctrl+C to stop)"
 Write-Host "Health: http://localhost:${port}/health"
 Write-Host "Dashboard (MR reviews): http://localhost:${port}/"
-Write-Host "Official OCR Viewer (optional): ocr viewer -> http://localhost:5483"
+Write-Host "Stats overview: http://localhost:${port}/stats"
+Write-Host "Official OCR Viewer (optional, disabled by default): set OCR_VIEWER_ENABLED=1, then run 'ocr viewer -> http://localhost:5483'"
 Write-Host "CI should use OCR_GATEWAY_URL=http://host.docker.internal:${port}"
 
 Push-Location $Root

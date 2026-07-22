@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>统计概览 - OCR Gateway</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="breadcrumb">
+        <a href="/">OCR Gateway Dashboard</a>
+        <span class="muted">:8010</span>
+        <span class="nav-links">
+            <a href="/" class="tab-link">评审工作台</a>
+            <a href="/stats" class="tab-link active">统计概览</a>
+            <a href="/repos" class="tab-link">按仓库</a>
+        </span>
+    </nav>
+    <main>
+        <div class="page-header">
+            <h1>统计概览</h1>
+            <div class="header-actions">
+                <div class="days-switch">
+                    {% for d in [7, 14, 30, 90] %}
+                    <a class="btn {% if d == days %}btn-primary{% endif %}" href="/stats?days={{ d }}">{{ d }} 天</a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        {% set kpis = overview.kpis %}
+        <section class="kpi-bar">
+            <div class="kpi"><span class="kpi-label">今日评审</span><span class="kpi-value">{{ kpis.today_reviews }}</span></div>
+            <div class="kpi"><span class="kpi-label">最新 HIGH 合计</span><span class="kpi-value sev-high">{{ kpis.open_high }}</span></div>
+            <div class="kpi"><span class="kpi-label">队列深度</span><span class="kpi-value">{{ kpis.queue_depth }}</span></div>
+            <div class="kpi"><span class="kpi-label">7 日中位 Token</span><span class="kpi-value">{{ kpis.median_tokens_7d_fmt }}</span></div>
+        </section>
+
+        <section class="stats-charts">
+            <div class="chart-card chart-card-wide">
+                <h2>每日评审量 / HIGH（横向日期轴，可左右滑动）</h2>
+                <div class="chart-scroll">
+                    <canvas id="chartReviews" height="200"></canvas>
+                </div>
+                <p class="muted chart-fallback" id="chartReviewsFallback" hidden>图表加载失败，见下方数据表。</p>
+            </div>
+            <div class="chart-card">
+                <h2>每日 Token 中位数（{{ days }} 天）</h2>
+                <div class="chart-scroll">
+                    <canvas id="chartTokens" height="200"></canvas>
+                </div>
+                <p class="muted chart-fallback" id="chartTokensFallback" hidden>图表加载失败，见下方数据表。</p>
+            </div>
+        </section>
+
+        <section class="stats-tables">
+            <div class="stats-block">
+                <h2>项目 HIGH Top5（最新一次评审累计）</h2>
+                {% if overview.project_high_top %}
+                <table class="table">
+                    <thead>
+                        <tr><th>项目</th><th class="sev-high">HIGH</th><th>评审 MR 数</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in overview.project_high_top %}
+                        <tr>
+                            <td>{{ row.project_path }}</td>
+                            <td class="sev-high">{{ row.high }}</td>
+                            <td>{{ row.reviews }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="muted">暂无成功评审数据。</p>
+                {% endif %}
+            </div>
+
+            <div class="stats-block">
+                <h2>每日明细（{{ days }} 天）</h2>
+                <table class="table compact">
+                    <thead>
+                        <tr><th>日期</th><th>评审数</th><th class="sev-high">HIGH</th><th>Token 中位</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for row in overview.daily %}
+                        <tr>
+                            <td>{{ row.date }}</td>
+                            <td>{{ row.reviews }}</td>
+                            <td class="sev-high">{{ row.high }}</td>
+                            <td>{{ row.median_tokens }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <footer class="page-footer muted">
+            数据来自 review-index.jsonl 内存聚合，未持久化；历史窗口上限 90 天。时间按 UTC+8 聚合与显示。
+        </footer>
+    </main>
+
+    <!-- 注入 SSR 数据供 stats.js 渲染图表；Chart.js CDN 加载失败时降级为表格 -->
+    <script type="application/json" id="statsData">{{ overview | tojson }}</script>
+
+    <!-- Chart.js CDN：离线时图表降级为数据表 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+    <script src="/static/stats.js" defer></script>
+</body>
+</html>

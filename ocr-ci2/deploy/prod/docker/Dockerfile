@@ -6,6 +6,7 @@
 # 逻辑清单：
 # - 始终：镜像内 npm install -g OCR CLI（全新层，无 skip-if-present）
 # - 复制：bake 后的 .build/config.json、gateway/、scripts/、发帖脚本到 /usr/local/lib/ocr-ci
+# - 构建：viewer-spa（Vue 3）产物到 /app/viewer-spa/dist（方案 C，由 OCR_DASHBOARD_SPA 开关）
 # - 不做：运行时挂载宿主机 ~/.opencodereview（配置在构建时 bake）
 
 FROM docker.1ms.run/library/node:20
@@ -30,12 +31,21 @@ RUN chmod +x /usr/local/lib/ocr-ci/post_ocr_to_gitlab.py
 COPY gateway/requirements.txt /tmp/gateway-requirements.txt
 RUN pip3 install --break-system-packages --no-cache-dir -r /tmp/gateway-requirements.txt
 
+# 方案 C：先装 SPA 依赖再拷源码，利于 Docker 层缓存
+COPY viewer-spa/package.json viewer-spa/package-lock.json* /app/viewer-spa/
+WORKDIR /app/viewer-spa
+RUN npm install --no-audit --no-fund
+COPY viewer-spa /app/viewer-spa
+RUN npm run build
+
+WORKDIR /app
 COPY gateway /app/gateway
 COPY scripts /app/scripts
 COPY viewer /app/viewer
-WORKDIR /app
 ENV PYTHONPATH=/app
 ENV OCR_POST_SCRIPT=/usr/local/lib/ocr-ci/post_ocr_to_gitlab.py
+# 默认仍用方案 A；生产按需设 OCR_DASHBOARD_SPA=1
+ENV OCR_DASHBOARD_SPA=1
 
 EXPOSE 8010
 CMD ["python3", "-m", "uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8010"]

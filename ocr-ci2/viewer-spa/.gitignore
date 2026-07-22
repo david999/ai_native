@@ -1,0 +1,5 @@
+# 前端依赖与构建产物（生产由 Gateway 镜像内 npm run build 生成）
+node_modules/
+dist/
+.DS_Store
+*.local

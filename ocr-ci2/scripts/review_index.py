@@ -6,11 +6,16 @@ import json
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from session_telemetry import SeverityCounts, TokenUsage, format_token_count
+
+
+# Dashboard 固定按 UTC+8（Asia/Shanghai，无夏令时）切日与显示，
+# 避免 UTC 零点边界导致 UTC+8 用户「今日评审」错位 8 小时。
+DASHBOARD_TZ = timezone(timedelta(hours=8))
 
 
 def _work_root() -> Path:
@@ -164,10 +169,10 @@ def list_sessions_for_mr(
     return records
 
 
-def list_mr_latest_reviews(path: Path | None = None) -> list[ReviewRecord]:
-    """One row per (project_id, mr_iid) — latest finished_at."""
+def latest_per_mr(records: list[ReviewRecord]) -> list[ReviewRecord]:
+    """对内存中的 records 取每个 (project_id, mr_iid) 的最新一条（finished_at 降序）。"""
     by_key: dict[tuple[str, str], ReviewRecord] = {}
-    for record in load_all_records(path):
+    for record in records:
         key = record.mr_key
         existing = by_key.get(key)
         if existing is None or record.finished_at >= existing.finished_at:
@@ -175,6 +180,21 @@ def list_mr_latest_reviews(path: Path | None = None) -> list[ReviewRecord]:
     results = list(by_key.values())
     results.sort(key=lambda r: r.finished_at, reverse=True)
     return results
+
+
+def list_mr_latest_reviews(path: Path | None = None) -> list[ReviewRecord]:
+    """One row per (project_id, mr_iid) — latest finished_at."""
+    return latest_per_mr(load_all_records(path))
+
+
+def find_record_by_job_id(job_id: str, path: Path | None = None) -> ReviewRecord | None:
+    """按 job_id 查找索引记录（找不到返回 None）。"""
+    if not job_id:
+        return None
+    for record in load_all_records(path):
+        if record.job_id == job_id:
+            return record
+    return None
 
 
 def build_record_from_session(
@@ -219,13 +239,14 @@ def build_record_from_session(
 
 
 def finished_at_datetime(record: ReviewRecord) -> datetime:
-    return datetime.fromtimestamp(record.finished_at, tz=timezone.utc)
+    # 按 UTC+8 返回，供模板 format_time 与 API ISO 显示一致
+    return datetime.fromtimestamp(record.finished_at, tz=DASHBOARD_TZ)
 
 
 def compute_kpis(records: list[ReviewRecord], queue_depth: int = 0) -> dict[str, Any]:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=DASHBOARD_TZ)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-    latest = list_mr_latest_reviews()
+    latest = latest_per_mr(records)
     today_count = sum(1 for r in records if r.finished_at >= today_start and r.status == "success")
     open_high = sum(int(r.severity.get("HIGH", 0)) for r in latest if r.status == "success")
     week_tokens = [
@@ -241,4 +262,71 @@ def compute_kpis(records: list[ReviewRecord], queue_depth: int = 0) -> dict[str,
         "queue_depth": queue_depth,
         "median_tokens_7d": median_tokens,
         "median_tokens_7d_fmt": format_token_count(median_tokens),
+    }
+
+
+def compute_stats_overview(
+    records: list[ReviewRecord],
+    *,
+    days: int = 30,
+    queue_depth: int = 0,
+) -> dict[str, Any]:
+    """统计概览聚合：每日评审量/HIGH/Token 中位数 + 项目 HIGH Top5（无 DB，纯内存）。"""
+    days = max(1, min(int(days), 90))
+    now = datetime.now(tz=DASHBOARD_TZ)
+    kpis = compute_kpis(records, queue_depth=queue_depth)
+
+    # 按天聚合最近 N 天的成功评审
+    daily: list[dict[str, Any]] = []
+    for offset in range(days - 1, -1, -1):
+        day_start = (now - timedelta(days=offset)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        day_ts = day_start.timestamp()
+        day_end = day_ts + 86400
+        day_records = [
+            r
+            for r in records
+            if day_ts <= r.finished_at < day_end and r.status == "success"
+        ]
+        token_vals = sorted(int(r.tokens.get("total", 0)) for r in day_records)
+        median = token_vals[len(token_vals) // 2] if token_vals else 0
+        daily.append(
+            {
+                "date": day_start.strftime("%Y-%m-%d"),
+                "reviews": len(day_records),
+                "high": sum(int(r.severity.get("HIGH", 0)) for r in day_records),
+                "median_tokens": median,
+            }
+        )
+
+    # 按项目聚合「最新一次评审」的 HIGH 合计与评审数
+    by_project_high: dict[str, int] = {}
+    by_project_reviews: dict[str, int] = {}
+    for record in latest_per_mr(records):
+        if record.status != "success":
+            continue
+        path = record.project_path or "(unknown)"
+        by_project_high[path] = by_project_high.get(path, 0) + int(
+            record.severity.get("HIGH", 0)
+        )
+        by_project_reviews[path] = by_project_reviews.get(path, 0) + 1
+
+    project_high_top = sorted(
+        [
+            {
+                "project_path": path,
+                "high": high,
+                "reviews": by_project_reviews.get(path, 0),
+            }
+            for path, high in by_project_high.items()
+        ],
+        key=lambda row: (-row["high"], -row["reviews"], row["project_path"]),
+    )[:5]
+
+    return {
+        "kpis": kpis,
+        "days": days,
+        "daily": daily,
+        "project_high_top": project_high_top,
     }

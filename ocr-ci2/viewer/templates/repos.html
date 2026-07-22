@@ -17,7 +17,7 @@
     <h1>Repositories</h1>
     <p class="hint">
         按 OCR session 目录聚合；severity / tokens 取<strong>最新一次 session</strong>。
-        官方详情：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
+        {% if official_viewer_url %}官方详情：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>{% endif %}
     </p>
 
     <div class="filters">
@@ -58,7 +58,7 @@
                 <td class="links">
                     {% if repo.has_high %}<span class="badge badge-high">HIGH</span>{% endif %}
                     <a href="{{ repo.repo_url }}">Sessions</a>
-                    <a href="{{ repo.official_url }}" target="_blank" rel="noopener" title="最新 session 官方 Viewer">:5483</a>
+                    {% if repo.official_url %}<a href="{{ repo.official_url }}" target="_blank" rel="noopener" title="最新 session 官方 Viewer">:5483</a>{% endif %}
                 </td>
             </tr>
         {% endfor %}
@@ -69,7 +69,7 @@
     {% endif %}
 
     <footer class="page-footer muted">
-        官方 OCR Viewer：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>
+        {% if official_viewer_url %}官方 OCR Viewer：<a href="{{ official_viewer_url }}" target="_blank" rel="noopener">{{ official_viewer_url }}</a>{% endif %}
     </footer>
 </main>
 </body>

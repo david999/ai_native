@@ -15,6 +15,7 @@ from gateway.main import app
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("OCR_VIEWER_URL", "http://localhost:5483")
+    monkeypatch.setenv("OCR_VIEWER_ENABLED", "1")
     return TestClient(app)
 
 
@@ -28,6 +29,22 @@ def test_index_empty_sessions(client, monkeypatch, tmp_path):
     assert resp.status_code == 200
     assert "OCR Gateway Dashboard" in resp.text
     assert "http://localhost:5483" in resp.text
+
+
+def test_index_hides_viewer_links_when_disabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("OCR_SESSIONS_DIR", str(tmp_path))
+    idx = tmp_path / "idx.jsonl"
+    idx.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OCR_REVIEW_INDEX_PATH", str(idx))
+    monkeypatch.setenv("OCR_VIEWER_ENABLED", "0")
+    monkeypatch.delenv("OCR_VIEWER_URL", raising=False)
+    monkeypatch.setattr("gateway.review_service.list_active_jobs", lambda: [])
+    client = TestClient(app)
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "OCR Gateway Dashboard" in resp.text
+    assert "http://localhost:5483" not in resp.text
+    assert "官方 OCR Viewer" not in resp.text
 
 
 def test_index_with_mr_record(client, monkeypatch, tmp_path):
@@ -176,6 +193,7 @@ def test_path_traversal_rejected(client, monkeypatch, tmp_path):
 def test_session_detail(client, monkeypatch, tmp_path):
     monkeypatch.setenv("OCR_SESSIONS_DIR", str(tmp_path))
     monkeypatch.setenv("OCR_REVIEW_INDEX_PATH", str(tmp_path / "idx.jsonl"))
+    monkeypatch.setenv("OCR_VIEWER_ENABLED", "1")
     repo = tmp_path / "proj-abc"
     jsonl = repo / "sess1.jsonl"
     jsonl.parent.mkdir(parents=True)

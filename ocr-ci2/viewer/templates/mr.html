@@ -35,7 +35,7 @@
         {% for r in reviews %}
             <tr{% if r.is_latest %} class="row-latest"{% elif r.has_high %} class="row-high"{% elif r.status == 'failed' %} class="row-failed"{% endif %}>
                 <td>{{ r.finished_at | format_time }}</td>
-                <td><span class="status status-{{ r.status }}">{{ r.status }}</span></td>
+                <td><span class="status status-{{ r.status }}" title="{{ r.status_hint }}">{{ r.status_label }}</span></td>
                 <td><code>{{ r.commit_short }}</code></td>
                 <td class="sev-high">{{ r.high }}</td>
                 <td class="sev-medium">{{ r.medium }}</td>
@@ -46,7 +46,7 @@
                 <td class="links">
                     {% if r.session_url %}
                     <a href="{{ r.session_url }}">Session</a>
-                    <a href="{{ r.official_url }}" target="_blank" rel="noopener">官方 Viewer</a>
+                    {% if r.official_url %}<a href="{{ r.official_url }}" target="_blank" rel="noopener">官方 Viewer</a>{% endif %}
                     {% else %}
                     <span class="muted">—</span>
                     {% endif %}

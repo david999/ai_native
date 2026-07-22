@@ -30,6 +30,14 @@ def sessions_root() -> Path:
 
 
 def official_viewer_url() -> str:
+    """官方 OCR viewer 基址。
+
+    默认关闭（返回空字符串），需设置 ``OCR_VIEWER_ENABLED=1`` 才启用。
+    启用后读取 ``OCR_VIEWER_URL``（默认 ``http://localhost:5483``）。
+    返回空字符串时，Dashboard 不渲染官方 viewer 跳转链接。
+    """
+    if os.environ.get("OCR_VIEWER_ENABLED", "").strip().lower() not in ("1", "true", "yes"):
+        return ""
     return os.environ.get("OCR_VIEWER_URL", "http://localhost:5483").rstrip("/")
 
 
@@ -149,6 +157,8 @@ class RepoTelemetry:
     tokens: TokenUsage = field(default_factory=TokenUsage)
     latest_tokens: TokenUsage = field(default_factory=TokenUsage)
     latest_severity: SeverityCounts = field(default_factory=SeverityCounts)
+    # 与 list_repo_sessions 按 mtime 降序后首条一致，供 Dashboard 内联加载避免二次扫描
+    latest_session_id: str = ""
 
     @property
     def has_high(self) -> bool:
@@ -542,6 +552,7 @@ def discover_repos(root: Path | None = None) -> list[RepoTelemetry]:
                 tokens=repo_tokens,
                 latest_tokens=sessions[0].tokens if sessions else TokenUsage(),
                 latest_severity=sessions[0].severity if sessions else SeverityCounts(),
+                latest_session_id=sessions[0].session_id if sessions else "",
             )
         )
 
@@ -557,3 +568,70 @@ def load_session(root: Path, encoded_repo: str, session_id: str) -> SessionTelem
     if path is None:
         return None
     return scan_session_jsonl(path)
+
+
+def comment_to_dict(comment: SeverityComment) -> dict[str, Any]:
+    """将单条 severity 评论序列化为 dict，供 JSON API / 模板使用。"""
+    return {
+        "level": comment.level,
+        "file_path": comment.file_path,
+        "line": comment.line,
+        "snippet": comment.snippet,
+    }
+
+
+def group_comments_by_file(comments: list[SeverityComment]) -> list[dict[str, Any]]:
+    """按文件聚合评论，供工作台/Session 文件树使用（同文件内 HIGH 优先）。
+
+    返回结构::
+
+        [
+          {
+            "file_path": str,
+            "comment_count": int,
+            "severity": {"HIGH": n, "MEDIUM": n, "LOW": n},
+            "comments": [{level, file_path, line, snippet}, ...],
+          },
+          ...
+        ]
+
+    文件排序：含 HIGH 的文件优先，其次 MEDIUM，最后 LOW；同级按 HIGH 数量降序、路径升序。
+    空文件路径归入 "(unknown)"。
+    """
+    level_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    by_file: dict[str, list[SeverityComment]] = {}
+    for comment in comments:
+        key = comment.file_path.strip() if comment.file_path else "(unknown)"
+        by_file.setdefault(key, []).append(comment)
+
+    files: list[dict[str, Any]] = []
+    for path, items in by_file.items():
+        items_sorted = sorted(
+            items,
+            key=lambda c: (level_order.get(c.level, 9), c.line, c.snippet),
+        )
+        sev = SeverityCounts()
+        for comment in items_sorted:
+            if comment.level == "HIGH":
+                sev.high += 1
+            elif comment.level == "MEDIUM":
+                sev.medium += 1
+            else:
+                sev.low += 1
+        files.append(
+            {
+                "file_path": path,
+                "comment_count": len(items_sorted),
+                "severity": sev.to_dict(),
+                "comments": [comment_to_dict(c) for c in items_sorted],
+            }
+        )
+
+    def _file_sort_key(entry: dict[str, Any]) -> tuple:
+        sev = entry["severity"]
+        # 含 HIGH 的文件排最前，其次 MEDIUM，最后 LOW
+        tier = 0 if sev.get("HIGH") else (1 if sev.get("MEDIUM") else 2)
+        return (tier, -int(sev.get("HIGH", 0)), -int(sev.get("MEDIUM", 0)), entry["file_path"])
+
+    files.sort(key=_file_sort_key)
+    return files

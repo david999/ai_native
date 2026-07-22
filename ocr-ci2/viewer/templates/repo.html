@@ -47,7 +47,7 @@
                 </div>
                 <div class="links">
                     <a href="{{ s.session_url }}">完整摘要</a>
-                    <a href="{{ s.official_url }}" target="_blank" rel="noopener" title="官方 Viewer（Token 按文件）">:5483</a>
+                    {% if s.official_url %}<a href="{{ s.official_url }}" target="_blank" rel="noopener" title="官方 Viewer（Token 按文件）">:5483</a>{% endif %}
                 </div>
             </header>
 
